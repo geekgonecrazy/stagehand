@@ -31,10 +31,12 @@ democtl prune            # after the conference: delete every demo VM
   history and workspace on the VM's persistent overlay. `democtl stop` halts
   the VM (no CPU/RAM use); `democtl open` boots it again with the session
   intact.
-- **Secrets stay on the host.** API keys are forwarded as smolvm *secret
-  references* (`--secret-env KEY=KEY`) — only the reference is recorded on the
-  machine, the value is resolved from your shell environment at each launch
-  and never written into the VM config or the golden image.
+- **Secrets stay on the host.** Provider keys are bound **host-side** with
+  smolvm's credential feature: the VM only ever sees a meaningless
+  `SMOL_PLACEHOLDER_*` value in the env var, and smolvm substitutes the real
+  value from your shell environment on HTTPS requests to the provider's
+  hosts. The secret itself never enters the VM — not on disk, not in the
+  image, not even in process memory of the guest.
 
 ## Install
 
@@ -52,7 +54,8 @@ In any directory (it becomes your demo workspace):
 democtl init                    # writes a starter demo.toml
 $EDITOR demo.toml               # one [demos.<name>] section per demo, with a fixed port
 democtl build                   # ~5 min once: installs packages + opencode in a
-                                #   template VM, then packs it to .democtl/golden.smolmachine
+                                #   template VM, then packs and extracts it to
+                                #   .democtl/rootfs (what demo machines clone)
 ```
 
 `demo.toml` reference:
@@ -60,7 +63,17 @@ democtl build                   # ~5 min once: installs packages + opencode in a
 ```toml
 [defaults]
 guest_port = 8080               # where your webapp listens inside the VM
-secret_env = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"]
+
+# Host-side credential bindings (recommended): the VM sees a placeholder,
+# the real value is substituted on HTTPS requests to the hosts you list —
+# and nowhere else. List every host the credential is actually sent to
+# (e.g. OpenRouter's API host is "openrouter.ai"), and have the env var
+# set in your shell whenever a machine is STARTED.
+[defaults.credentials.OPENROUTER_API_KEY]
+hosts = ["openrouter.ai"]
+
+# Plain secrets: the value IS visible inside the VM (for non-HTTPS tools).
+# secret_env = ["SOME_PLAIN_TOKEN"]
 net = true                      # outbound networking from the VM
 ssh_agent = true                # forward the host SSH agent (git push/pull from the VM)
 
@@ -76,6 +89,7 @@ workspace = "/workspace"        # working directory for open/exec
 [demos.checkout]
 port = 8410                     # FIXED host port — the demo's permanent URL
 # guest_port = 8080             # override [defaults].guest_port for this demo
+# credentials = { MY_KEY = { hosts = ["api.example.com"] } }  # replaces defaults for this demo
 ```
 
 ## Commands
@@ -135,10 +149,20 @@ democtl prune                   # delete all demo VMs (golden image is kept)
 - Machine names (`democtl-checkout-3`) and the demo they belong to are tracked
   via smolvm labels, so `list`/`rm`/`prune` only ever touch democtl's own
   machines.
-- The golden image lives at `.democtl/golden.smolmachine` next to your
-  `demo.toml` (gitignored). Deleting it is safe — `democtl build` recreates it.
+- The golden image lives under `.democtl/` next to your `demo.toml`
+  (gitignored): `rootfs/` is what demo machines clone, `golden.smolmachine`
+  is the portable pack it was extracted from. Deleting both is safe —
+  `democtl build` recreates them.
 - The template machine `democtl-template-<dir>` is reused across builds; pass
   `--force` to rebuild it from scratch.
 - opencode is installed under `/usr/local/bin` in the image and starts in
   `/workspace` (created empty in the golden image). Git works out of the box
   through the forwarded SSH agent.
+- Credential bindings resolve the real value from the environment of whatever
+  shell **starts** the machine (`democtl new` / `start`). If it's missing,
+  requests to the bound hosts fail closed with
+  `smolvm credentials: credential unavailable` — set the var and restart the
+  machine. democtl warns at start when it can tell a var is missing.
+- Demo machines are created with `machine create --image <rootfs>` rather
+  than `--from <pack>` because smolvm 1.18.0 silently drops
+  `--credential`/`--secret-env` flags on the pack path.

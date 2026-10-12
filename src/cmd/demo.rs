@@ -1,5 +1,5 @@
 use crate::cmd::target;
-use crate::config::{Loaded, LABEL_DEMO, LABEL_IDX, LABEL_MANAGED};
+use crate::config::{EffectiveDemo, Loaded, LABEL_DEMO, LABEL_IDX, LABEL_MANAGED};
 use crate::smol::{exec_args, Machine, Smol};
 use crate::util::{self, ident};
 use anyhow::{bail, Context, Result};
@@ -21,9 +21,51 @@ fn machine_name(demo: &str, idx: i64) -> String {
     format!("democtl-{}-{idx}", ident(demo))
 }
 
+/// Host env vars that must be present when the machine is started:
+/// plain secrets (ref resolution) and credentials (request-time substitution).
+fn missing_env(eff: &EffectiveDemo) -> Vec<String> {
+    let mut missing: Vec<String> = eff
+        .secret_env
+        .iter()
+        .chain(eff.credentials.keys())
+        .filter(|name| match std::env::var(name) {
+            Ok(v) => v.is_empty(),
+            Err(_) => true,
+        })
+        .cloned()
+        .collect();
+    missing.sort();
+    missing.dedup();
+    missing
+}
+
+fn warn_missing_env(eff: &EffectiveDemo, when: &str) {
+    let missing = missing_env(eff);
+    if missing.is_empty() {
+        return;
+    }
+    let creds: Vec<&String> = missing
+        .iter()
+        .filter(|n| eff.credentials.contains_key(*n))
+        .collect();
+    util::warn(&format!(
+        "env not set in your shell ({}): {}{}",
+        when,
+        missing.join(", "),
+        if creds.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n  credential-bound requests will fail until these are set and the machine is restarted: {}",
+                creds.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", ")
+            )
+        }
+    ));
+}
+
 fn create_args(
     loaded: &Loaded,
-    eff: &crate::config::EffectiveDemo,
+    eff: &EffectiveDemo,
     name: &str,
     idx: i64,
     secrets: &[String],
@@ -33,8 +75,8 @@ fn create_args(
         "create",
         "--name",
         name,
-        "--from",
-        loaded.golden_path.to_string_lossy().as_ref(),
+        "--image",
+        loaded.rootfs_path.to_string_lossy().as_ref(),
     ]
     .iter()
     .map(|s| s.to_string())
@@ -55,6 +97,20 @@ fn create_args(
     if eff.ssh_agent {
         a.push("--ssh-agent".into());
     }
+    // Host-side credential bindings: the guest only ever sees a
+    // SMOL_PLACEHOLDER_* env value; smolvm substitutes the real value from the
+    // start-time environment on HTTPS requests to the bound hosts. The
+    // --secret-env ref is what carries the value into the VM's runtime.
+    for (name, hosts) in &eff.credentials {
+        a.push("--credential".into());
+        a.push(format!("{name}={name}@{}", hosts.join(",")));
+        a.push("--secret-env".into());
+        a.push(format!("{name}={name}"));
+    }
+    for s in secrets {
+        a.push("--secret-env".into());
+        a.push(s.clone());
+    }
     if let Some(cpus) = eff.cpus {
         a.push("--cpus".into());
         a.push(cpus.to_string());
@@ -63,10 +119,6 @@ fn create_args(
         a.push("--mem".into());
         a.push(mem.to_string());
     }
-    for s in secrets {
-        a.push("--secret-env".into());
-        a.push(s.clone());
-    }
     a
 }
 
@@ -74,14 +126,14 @@ fn refs(args: &[String]) -> Vec<&str> {
     args.iter().map(String::as_str).collect()
 }
 
-/// Ensure the golden image exists.
+/// Ensure the golden rootfs exists.
 fn require_golden(loaded: &Loaded) -> Result<()> {
-    if loaded.golden_path.is_file() {
+    if loaded.rootfs_path.is_dir() {
         return Ok(());
     }
     bail!(
-        "golden image not found at {} — build it first with `democtl build`",
-        loaded.golden_path.display()
+        "golden rootfs not found at {} — build it first with `democtl build`",
+        loaded.rootfs_path.display()
     );
 }
 
@@ -112,8 +164,9 @@ pub fn spawn_fresh(
             missing.join(", ")
         ));
     }
-    if eff.secret_env.is_empty() {
-        util::warn("no secret_env configured — opencode in the VM may have no provider API key");
+    warn_missing_env(eff, "the machine starts without these");
+    if eff.secret_env.is_empty() && eff.credentials.is_empty() {
+        util::warn("no credentials configured — opencode in the VM may have no provider API key");
     }
 
     let args = create_args(loaded, eff, &name, idx, &secrets);
@@ -162,10 +215,11 @@ pub fn new(loaded: &Loaded, smol: &Smol, demo: &str, attach: bool) -> Result<()>
     Ok(())
 }
 
-fn ensure_running(smol: &Smol, m: &Machine) -> Result<()> {
+fn ensure_running(smol: &Smol, m: &Machine, eff: &EffectiveDemo) -> Result<()> {
     if m.running() {
         return Ok(());
     }
+    warn_missing_env(eff, "starting now");
     println!(
         "{}",
         util::dim(&format!("==> starting {} (resuming preserved session)", m.name))
@@ -176,7 +230,7 @@ fn ensure_running(smol: &Smol, m: &Machine) -> Result<()> {
 pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, use_opencode: bool, cmd: &[String]) -> Result<()> {
     let eff = loaded.config.effective(demo)?;
     let m = target(smol, demo)?;
-    ensure_running(smol, &m)?;
+    ensure_running(smol, &m, &eff)?;
 
     let (secrets, _) = secret_refs(&eff);
     let tpl = &loaded.config.template;
@@ -210,7 +264,7 @@ pub fn exec(loaded: &Loaded, smol: &Smol, demo: &str, detach: bool, cmd: &[Strin
     }
     let eff = loaded.config.effective(demo)?;
     let m = target(smol, demo)?;
-    ensure_running(smol, &m)?;
+    ensure_running(smol, &m, &eff)?;
     let (secrets, _) = secret_refs(&eff);
     let interactive = !detach && std::io::IsTerminal::is_terminal(&std::io::stdin());
     let tpl = &loaded.config.template;
@@ -246,7 +300,7 @@ pub fn start(loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
         util::warn(&format!("{} is already running", m.name));
         return Ok(());
     }
-    ensure_running(smol, &m)?;
+    ensure_running(smol, &m, &eff)?;
     print_ready(&eff, &m.name);
     Ok(())
 }
@@ -272,6 +326,11 @@ mod tests {
     #[test]
     fn create_args_shape() {
         let loaded = test_loaded();
+        let mut credentials = std::collections::BTreeMap::new();
+        credentials.insert(
+            "ANTHROPIC_API_KEY".to_string(),
+            vec!["api.anthropic.com".to_string()],
+        );
         let eff = crate::config::EffectiveDemo {
             name: "checkout".into(),
             host_port: 8410,
@@ -281,16 +340,20 @@ mod tests {
             cpus: None,
             mem_mib: None,
             secret_env: vec!["K".into()],
+            credentials,
         };
         let a = create_args(&loaded, &eff, "democtl-checkout-1", 1, &["K=K".to_string()]);
         let s: Vec<&str> = a.iter().map(String::as_str).collect();
         assert_eq!(
             s,
             vec![
-                "machine", "create", "--name", "democtl-checkout-1", "--from", "/p/.democtl/golden.smolmachine",
+                "machine", "create", "--name", "democtl-checkout-1", "--image", "/p/.democtl/rootfs",
                 "--net", "-p", "8410:8080",
                 "--label", "democtl=1", "--label", "demo=checkout", "--label", "idx=1",
-                "--ssh-agent", "--secret-env", "K=K",
+                "--ssh-agent",
+                "--credential", "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY@api.anthropic.com",
+                "--secret-env", "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY",
+                "--secret-env", "K=K",
             ]
         );
     }
@@ -311,6 +374,7 @@ mod tests {
                     net: true,
                     ssh_agent: true,
                     secret_env: vec![],
+                    credentials: Default::default(),
                     guest_port: 8080,
                     cpus: None,
                     mem_mib: None,
@@ -320,6 +384,7 @@ mod tests {
             dot_dir: "/p/.democtl".into(),
             template_name: "democtl-template-p".into(),
             golden_path: "/p/.democtl/golden.smolmachine".into(),
+            rootfs_path: "/p/.democtl/rootfs".into(),
         }
     }
 

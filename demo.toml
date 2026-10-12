@@ -3,7 +3,26 @@
 
 [defaults]
 guest_port = 8080                 # port the webapp listens on inside the VM
-secret_env = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"]  # host vars forwarded into each VM (refs only)
+
+# Credentials bound HOST-SIDE: the VM only ever sees a SMOL_PLACEHOLDER_*
+# value; smolvm substitutes the real value from your shell env on HTTPS
+# requests to the hosts listed below. The secret never enters the VM.
+#
+# List EVERY host the credential is actually sent to — requests to any
+# host not listed pass through with the placeholder unchanged (and would
+# fail auth). The host must match what the client really connects to,
+# e.g. OpenRouter's API host is "openrouter.ai".
+#
+# Set the var in your shell when a machine is STARTED.
+[defaults.credentials.OPENROUTER_API_KEY]
+hosts = ["openrouter.ai"]
+
+# Add more bindings as needed, e.g.:
+# [defaults.credentials.ANTHROPIC_API_KEY]
+# hosts = ["api.anthropic.com"]
+
+# For secrets that must be plainly visible inside the VM (non-HTTPS use):
+# secret_env = ["SOME_PLAIN_TOKEN"]
 # net = true                      # outbound networking (default true)
 # ssh_agent = true                # forward your SSH agent for git push/pull (default true)
 

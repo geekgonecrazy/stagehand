@@ -1,7 +1,9 @@
 use crate::config::{Loaded, ROLE_TEMPLATE};
 use crate::smol::Smol;
 use crate::util;
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
+use std::path::PathBuf;
+use std::process::Stdio;
 
 /// Shell script installed into the template machine by `democtl build`.
 /// `__PKGS__`, `__WORKSPACE__` and `__SETUP__` are substituted by [`build_script`].
@@ -142,15 +144,74 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
     let size = std::fs::metadata(&loaded.golden_path)
         .map(|m| format!(" ({})", humansize(m.len())))
         .unwrap_or_default();
+    util::ok(&format!("packed golden image{size}"));
+
+    extract_rootfs(loaded)?;
+
     util::ok(&format!(
-        "golden image ready at {}{size}",
-        loaded.golden_path.display()
+        "golden rootfs ready at {}",
+        loaded.rootfs_path.display()
     ));
     println!(
         "\nnext: {} to start a demo VM",
         util::bold("democtl new <demo>")
     );
     Ok(())
+}
+
+/// Unpack the pack's flattened rootfs layer into `.democtl/rootfs`.
+///
+/// Demo machines are created with `machine create --image <rootfs>` because
+/// smolvm's `create --from <pack>` silently drops `--credential` and
+/// `--secret-env` bindings (smolvm 1.18.0); the `--image` path honors them.
+fn extract_rootfs(loaded: &Loaded) -> Result<()> {
+    let pack_extract = loaded.dot_dir.join("pack-extract");
+    let _ = std::fs::remove_dir_all(&pack_extract);
+    let _ = std::fs::remove_dir_all(&loaded.rootfs_path);
+    std::fs::create_dir_all(&pack_extract)?;
+    std::fs::create_dir_all(&loaded.rootfs_path)?;
+
+    let pack = loaded.golden_path.to_string_lossy().into_owned();
+    let extract_dir = pack_extract.to_string_lossy().into_owned();
+    // The pack tar also contains a sparse storage.ext4 member that bsdtar
+    // reports as truncated even when the layers extract fine.
+    tar(&["-xf", &pack, "-C", &extract_dir, "layers"], "extracting pack", true)?;
+
+    let layers_dir = pack_extract.join("layers");
+    let mut layers: Vec<PathBuf> = std::fs::read_dir(&layers_dir)
+        .with_context(|| format!("reading {}", layers_dir.display()))?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().map(|x| x == "tar").unwrap_or(false))
+        .collect();
+    if layers.len() != 1 {
+        bail!(
+            "expected exactly one rootfs layer in the pack, found {}",
+            layers.len()
+        );
+    }
+    let layer = layers.pop().unwrap().to_string_lossy().into_owned();
+    let rootfs = loaded.rootfs_path.to_string_lossy().into_owned();
+    tar(&["-xf", &layer, "-C", &rootfs], "extracting rootfs", false)?;
+
+    let _ = std::fs::remove_dir_all(&pack_extract);
+    Ok(())
+}
+
+fn tar(args: &[&str], what: &str, allow_truncated: bool) -> Result<()> {
+    let out = std::process::Command::new("tar")
+        .args(args)
+        .stderr(Stdio::piped())
+        .output()
+        .context("running tar (is bsdtar with zstd support available?)")?;
+    if out.status.success() {
+        return Ok(());
+    }
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    if allow_truncated && stderr.contains("Truncated input file") {
+        return Ok(());
+    }
+    bail!("tar failed while {what}:\n{stderr}");
 }
 
 fn refs(args: &[String]) -> Vec<&str> {
