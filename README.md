@@ -1,0 +1,144 @@
+# democtl
+
+Run repeatable conference demos in disposable [smolvm](https://smolmachines.com) micro-VMs.
+
+One command starts a **fresh Linux VM with opencode already installed**, your API keys
+and SSH agent forwarded in, and the demo's webapp port reachable at a URL that never
+changes. When the demo is over, one command stops the VM — the opencode session and
+workspace stay preserved on the VM's disk, ready to resume, and nothing keeps running
+on your Mac.
+
+```
+democtl build            # once: template VM → golden image (opencode preinstalled)
+democtl new checkout     # per run: fresh VM, http://localhost:8410 is live
+democtl open checkout    # attach: opencode (or a shell) inside the VM
+democtl stop checkout    # done: VM stopped, session preserved
+democtl start checkout   # later: same machine back at http://localhost:8410
+democtl prune            # after the conference: delete every demo VM
+```
+
+## Why this shape
+
+- **A fresh VM per demo run.** `democtl new checkout` clones a golden image
+  (`create --from`, ~sub-second boot), so every showing of the demo starts
+  from a known-good state. Old machines are kept, not deleted — run the same
+  demo five times and you get `democtl-checkout-1..5`, each preserved.
+- **Fixed ports, declared once.** Each demo gets a permanent host port in
+  `demo.toml` (`checkout → 8410`). Forwarding is attached to the VM at
+  creation, so `http://localhost:8410` works the moment the guest listens —
+  and it is the same place every single time.
+- **Sessions survive the machine stopping.** opencode stores its session
+  history and workspace on the VM's persistent overlay. `democtl stop` halts
+  the VM (no CPU/RAM use); `democtl open` boots it again with the session
+  intact.
+- **Secrets stay on the host.** API keys are forwarded as smolvm *secret
+  references* (`--secret-env KEY=KEY`) — only the reference is recorded on the
+  machine, the value is resolved from your shell environment at each launch
+  and never written into the VM config or the golden image.
+
+## Install
+
+```sh
+cargo install --path .          # installs `democtl` onto your PATH
+```
+
+Requires `smolvm` on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
+
+## Setup
+
+In any directory (it becomes your demo workspace):
+
+```sh
+democtl init                    # writes a starter demo.toml
+$EDITOR demo.toml               # one [demos.<name>] section per demo, with a fixed port
+democtl build                   # ~5 min once: installs packages + opencode in a
+                                #   template VM, then packs it to .democtl/golden.smolmachine
+```
+
+`demo.toml` reference:
+
+```toml
+[defaults]
+guest_port = 8080               # where your webapp listens inside the VM
+secret_env = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"]
+net = true                      # outbound networking from the VM
+ssh_agent = true                # forward the host SSH agent (git push/pull from the VM)
+
+[template]                      # optional — golden image recipe
+image = "debian:bookworm-slim"  # base image for the template
+packages = ["git", "curl"]      # extra packages installed into the golden image
+setup = """                     # extra setup shell script, runs in the template
+cargo install --git https://github.com/some/demo-tool
+"""
+shell = "/bin/bash"             # what `democtl open` drops you into
+workspace = "/workspace"        # working directory for open/exec
+
+[demos.checkout]
+port = 8410                     # FIXED host port — the demo's permanent URL
+# guest_port = 8080             # override [defaults].guest_port for this demo
+```
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `democtl init` | Write a starter `demo.toml` |
+| `democtl build [--force]` | (Re)build the golden image from the `[template]` recipe |
+| `democtl new <demo> [--attach]` | Fresh VM from the golden image, started, port live |
+| `democtl open <demo> [--opencode] [-- cmd]` | Attach to the newest machine (shell by default; boots it first if stopped) |
+| `democtl exec <demo> [--detach] [-- cmd]` | Run a one-off command (`--detach` for background servers) |
+| `democtl url <demo>` | Print the demo's permanent URL |
+| `democtl start <demo>` | Boot the newest machine again (resume) |
+| `democtl stop <demo>` | Stop the newest machine, session preserved |
+| `democtl list` | Demos, machines, states, URLs |
+| `democtl reset <demo>` | Throw away the newest machine, start a fresh one (same port) |
+| `democtl rm <demo> [--all]` | Delete machines of a demo |
+| `democtl prune [--template]` | Delete **all** demo machines (conference is over) |
+
+Every per-demo command targets the *most recent* machine of that demo. `list`
+shows what that is.
+
+## Conference-day runbook
+
+The night before:
+
+```sh
+democtl build                   # refresh the golden image if [template] changed
+democtl new checkout && democtl stop checkout   # dress rehearsal, machine stays archived
+```
+
+On stage, per showing:
+
+```sh
+democtl new checkout --attach   # fresh VM + straight into opencode
+# ... run the demo; the webapp is at http://localhost:8410 ...
+#   start a webserver from another terminal, e.g.:
+#   democtl exec checkout --detach -- python3 -m http.server 8080 --directory /workspace
+democtl stop checkout           # VM off, nothing running, session archived
+```
+
+Questions from the audience about yesterday's run?
+
+```sh
+democtl open checkout           # boots the archived machine with the session intact
+```
+
+Flying home:
+
+```sh
+democtl list                    # see everything
+democtl prune                   # delete all demo VMs (golden image is kept)
+```
+
+## Notes
+
+- Machine names (`democtl-checkout-3`) and the demo they belong to are tracked
+  via smolvm labels, so `list`/`rm`/`prune` only ever touch democtl's own
+  machines.
+- The golden image lives at `.democtl/golden.smolmachine` next to your
+  `demo.toml` (gitignored). Deleting it is safe — `democtl build` recreates it.
+- The template machine `democtl-template-<dir>` is reused across builds; pass
+  `--force` to rebuild it from scratch.
+- opencode is installed under `/usr/local/bin` in the image and starts in
+  `/workspace` (created empty in the golden image). Git works out of the box
+  through the forwarded SSH agent.

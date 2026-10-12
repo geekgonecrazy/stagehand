@@ -1,0 +1,14 @@
+# democtl configuration — one section per conference demo.
+# Every demo gets a FIXED host port: the demo is always at the same URL.
+
+[defaults]
+guest_port = 8080                 # port the webapp listens on inside the VM
+secret_env = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"]  # host vars forwarded into each VM (refs only)
+# net = true                      # outbound networking (default true)
+# ssh_agent = true                # forward your SSH agent for git push/pull (default true)
+
+[demos.checkout]
+port = 8410                       # ALWAYS http://localhost:8410
+
+[demos.search]
+port = 8420
