@@ -366,10 +366,12 @@ mod tests {
                     cpus: None,
                     mem_mib: None,
                     packages: vec![],
+                    tools: vec![],
                     setup: None,
                     shell: "/bin/bash".into(),
                     workspace: "/workspace".into(),
                 },
+                build: None,
                 defaults: crate::config::DefaultsCfg {
                     net: true,
                     ssh_agent: true,
@@ -385,6 +387,8 @@ mod tests {
             template_name: "democtl-template-p".into(),
             golden_path: "/p/.democtl/golden.smolmachine".into(),
             rootfs_path: "/p/.democtl/rootfs".into(),
+            builder_name: "democtl-builder-p".into(),
+            artifacts_dir: "/p/.democtl/artifacts".into(),
         }
     }
 

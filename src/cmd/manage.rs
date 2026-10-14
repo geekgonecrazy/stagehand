@@ -73,7 +73,13 @@ pub fn list(loaded: &Loaded, smol: &Smol) -> Result<()> {
     if !orphans.is_empty() {
         println!("{}", util::dim("— managed but not configured —"));
         for m in orphans {
-            let kind = if m.is_template() { "template" } else { "orphan" };
+            let kind = if m.is_template() {
+                "template"
+            } else if m.is_builder() {
+                "builder"
+            } else {
+                "orphan"
+            };
             println!(
                 "{:<demo_w$}  {:<mach_w$}  {:<9}  {}",
                 util::dim(kind),

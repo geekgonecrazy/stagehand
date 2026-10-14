@@ -12,6 +12,8 @@ pub const LABEL_IDX: &str = "idx";
 /// Label marking the golden-image template machine.
 pub const LABEL_ROLE: &str = "role";
 pub const ROLE_TEMPLATE: &str = "template";
+/// Label marking the Linux build machine.
+pub const ROLE_BUILDER: &str = "builder";
 
 #[derive(Debug, Clone)]
 pub struct TemplateCfg {
@@ -19,6 +21,9 @@ pub struct TemplateCfg {
     pub cpus: Option<u32>,
     pub mem_mib: Option<u32>,
     pub packages: Vec<String>,
+    /// mise tool specs installed into the golden image (e.g. `opencode@latest`).
+    /// Each tool is also symlinked to /usr/local/bin so non-mise shells see it.
+    pub tools: Vec<String>,
     /// Extra shell script run inside the template after the default setup.
     pub setup: Option<String>,
     pub shell: String,
@@ -69,9 +74,28 @@ pub struct EffectiveDemo {
     pub credentials: BTreeMap<String, Vec<String>>,
 }
 
+/// Optional Linux build machine: cross-compiles artifacts (e.g. a Linux
+/// binary of a host project) that get installed into the golden image.
+#[derive(Debug, Clone)]
+pub struct BuildCfg {
+    pub image: String,
+    /// Host directory mounted read-write at `/src` inside the builder.
+    pub source: PathBuf,
+    /// mise tool specs installed in the builder before `script` runs
+    /// (e.g. `rust@stable`). The shims dir is prepended to PATH.
+    pub tools: Vec<String>,
+    /// Shell script run inside the builder (cwd `/build`). Must place
+    /// exportable files under `/build/artifacts/`.
+    pub script: String,
+    /// File names under `/build/artifacts/` to copy back to the host and
+    /// install into the template at `/usr/local/bin/`.
+    pub artifacts: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub template: TemplateCfg,
+    pub build: Option<BuildCfg>,
     pub defaults: DefaultsCfg,
     pub demos: BTreeMap<String, DemoCfg>,
 }
@@ -122,19 +146,60 @@ pub struct Loaded {
     pub dot_dir: PathBuf,
     /// Name of the golden-image template machine.
     pub template_name: String,
+    /// Name of the optional Linux build machine.
+    pub builder_name: String,
     /// Path of the packed golden image (build intermediate).
     pub golden_path: PathBuf,
     /// Unpacked golden rootfs — what demo machines are created from
     /// (`machine create --image`, which honors credential bindings).
     pub rootfs_path: PathBuf,
+    /// Where exported build artifacts land on the host.
+    pub artifacts_dir: PathBuf,
 }
 
 #[derive(Deserialize, Debug, Default)]
 struct RawConfig {
     template: Option<RawTemplate>,
+    build: Option<RawBuild>,
     defaults: Option<RawDefaults>,
     #[serde(default)]
     demos: BTreeMap<String, RawDemo>,
+}
+
+/// Optional Linux build machine config.
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
+struct RawBuild {
+    image: Option<String>,
+    source: Option<PathBuf>,
+    tools: Option<Vec<String>>,
+    script: Option<String>,
+    artifacts: Option<Vec<String>>,
+}
+
+impl RawBuild {
+    fn into_cfg(self) -> Result<BuildCfg> {
+        let source = self.source.ok_or_else(|| {
+            anyhow::anyhow!("[build] needs `source` — the host directory to mount at /src")
+        })?;
+        let script = self.script.ok_or_else(|| {
+            anyhow::anyhow!("[build] needs `script` — the build commands run inside the builder VM")
+        })?;
+        let artifacts = self.artifacts.unwrap_or_default();
+        if artifacts.is_empty() {
+            bail!("[build] needs at least one `artifacts` entry — file names under /build/artifacts/");
+        }
+        if script.trim().is_empty() {
+            bail!("[build] script is empty");
+        }
+        Ok(BuildCfg {
+            image: self.image.unwrap_or_else(|| "debian:bookworm-slim".into()),
+            source,
+            tools: self.tools.unwrap_or_default(),
+            script,
+            artifacts,
+        })
+    }
 }
 
 #[derive(Deserialize, Debug, Default)]
@@ -144,6 +209,7 @@ struct RawTemplate {
     cpus: Option<u32>,
     mem: Option<u32>,
     packages: Option<Vec<String>>,
+    tools: Option<Vec<String>>,
     setup: Option<String>,
     shell: Option<String>,
     workspace: Option<String>,
@@ -190,14 +256,15 @@ impl RawCredential {
 }
 
 pub fn default_packages() -> Vec<String> {
-    ["ca-certificates", "curl", "git", "jq", "less", "ripgrep"]
+    ["ca-certificates", "curl", "git", "jq", "less", "ripgrep", "unzip"]
         .iter()
         .map(|s| s.to_string())
         .collect()
 }
 
-impl From<RawConfig> for Config {
-    fn from(raw: RawConfig) -> Self {
+impl RawConfig {
+    fn into_config(self) -> Result<Config> {
+        let raw = self;
         let t = raw.template.unwrap_or_default();
         let d = raw.defaults.unwrap_or_default();
         let parse_creds = |m: Option<BTreeMap<String, RawCredential>>| -> Vec<(String, Result<CredentialCfg>)> {
@@ -218,16 +285,23 @@ impl From<RawConfig> for Config {
                 Err(e) => eprintln!("warning: [defaults.credentials.{k}]: {e}"),
             }
         }
-        Config {
+        let build = match raw.build.map(RawBuild::into_cfg) {
+            Some(Ok(cfg)) => Some(cfg),
+            Some(Err(e)) => bail!("{e}"),
+            None => None,
+        };
+        let mut config = Config {
             template: TemplateCfg {
                 image: t.image.unwrap_or_else(|| "debian:bookworm-slim".into()),
                 cpus: t.cpus,
                 mem_mib: t.mem,
                 packages: t.packages.unwrap_or_else(default_packages),
+                tools: t.tools.unwrap_or_default(),
                 setup: t.setup,
                 shell: t.shell.unwrap_or_else(|| "/bin/bash".into()),
                 workspace: t.workspace.unwrap_or_else(|| "/workspace".into()),
             },
+            build,
             defaults: DefaultsCfg {
                 net: d.net.unwrap_or(true),
                 ssh_agent: d.ssh_agent.unwrap_or(true),
@@ -237,37 +311,35 @@ impl From<RawConfig> for Config {
                 cpus: d.cpus,
                 mem_mib: d.mem,
             },
-            demos: raw
-                .demos
-                .into_iter()
-                .map(|(k, v)| {
-                    let credentials = match v.credentials {
-                        // per-demo credentials REPLACE the defaults when present
-                        Some(m) => {
-                            let mut out = BTreeMap::new();
-                            for (ck, r) in parse_creds(Some(m)) {
-                                if let Ok(c) = r {
-                                    out.insert(ck, c);
-                                }
-                            }
-                            Some(out)
+            demos: BTreeMap::new(),
+        };
+        for (k, v) in raw.demos {
+            let credentials = match v.credentials {
+                // per-demo credentials REPLACE the defaults when present
+                Some(m) => {
+                    let mut out = BTreeMap::new();
+                    for (ck, r) in parse_creds(Some(m)) {
+                        if let Ok(c) = r {
+                            out.insert(ck, c);
                         }
-                        None => None,
-                    };
-                    (
-                        k,
-                        DemoCfg {
-                            port: v.port,
-                            guest_port: v.guest_port,
-                            cpus: v.cpus,
-                            mem_mib: v.mem,
-                            secret_env: v.secret_env,
-                            credentials,
-                        },
-                    )
-                })
-                .collect(),
+                    }
+                    Some(out)
+                }
+                None => None,
+            };
+            config.demos.insert(
+                k,
+                DemoCfg {
+                    port: v.port,
+                    guest_port: v.guest_port,
+                    cpus: v.cpus,
+                    mem_mib: v.mem,
+                    secret_env: v.secret_env,
+                    credentials,
+                },
+            );
         }
+        Ok(config)
     }
 }
 
@@ -299,18 +371,27 @@ pub fn load(explicit: Option<&Path>) -> Result<Loaded> {
         &std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?,
     )
     .with_context(|| format!("parsing {}", path.display()))?;
-    let config: Config = raw.into();
+    let config: Config = raw.into_config()?;
+    if let Some(b) = &config.build {
+        if !b.source.is_dir() {
+            bail!("[build] source directory not found: {}", b.source.display());
+        }
+    }
 
     let dot_dir = dir.join(".democtl");
     let golden_path = dot_dir.join("golden.smolmachine");
     let rootfs_path = dot_dir.join("rootfs");
-    let template_name = format!("democtl-template-{}", slug(&dir));
+    let artifacts_dir = dot_dir.join("artifacts");
+    let slug = slug(&dir);
+    let template_name = format!("democtl-template-{slug}");
     Ok(Loaded {
         config,
         dot_dir,
         template_name,
+        builder_name: format!("democtl-builder-{slug}"),
         golden_path,
         rootfs_path,
+        artifacts_dir,
     })
 }
 
@@ -374,7 +455,7 @@ mod tests {
     #[test]
     fn parses_starter() {
         let raw: RawConfig = toml::from_str(STARTER).unwrap();
-        let cfg: Config = raw.into();
+        let cfg: Config = raw.into_config().unwrap();
         assert_eq!(cfg.demos.len(), 2);
         let eff = cfg.effective("checkout").unwrap();
         assert_eq!(eff.host_port, 8410);
@@ -385,7 +466,7 @@ mod tests {
     #[test]
     fn missing_port_is_an_error() {
         let raw: RawConfig = toml::from_str("[demos.x]\n").unwrap();
-        let cfg: Config = raw.into();
+        let cfg: Config = raw.into_config().unwrap();
         assert!(cfg.effective("x").is_err());
     }
 
@@ -395,7 +476,7 @@ mod tests {
             "[defaults.credentials.ANTHROPIC_API_KEY]\nhosts = [\"api.anthropic.com\"]\n\n[demos.y]\nport = 9000\n",
         )
         .unwrap();
-        let cfg: Config = raw.into();
+        let cfg: Config = raw.into_config().unwrap();
         let eff = cfg.effective("y").unwrap();
         assert_eq!(
             eff.credentials.get("ANTHROPIC_API_KEY").map(Vec::as_slice),
@@ -406,7 +487,7 @@ mod tests {
             "[defaults.credentials.A]\nhosts = [\"a.example\"]\n\n[demos.y.credentials.B]\nhosts = [\"b.example\"]\n\n[demos.y]\nport = 9000\n",
         )
         .unwrap();
-        let cfg: Config = raw.into();
+        let cfg: Config = raw.into_config().unwrap();
         let eff = cfg.effective("y").unwrap();
         assert!(eff.credentials.contains_key("B"));
         assert!(!eff.credentials.contains_key("A"));
@@ -415,7 +496,7 @@ mod tests {
     #[test]
     fn credential_without_hosts_is_rejected() {
         let raw: RawConfig = toml::from_str("[defaults.credentials.X]\n").unwrap();
-        let cfg: Config = raw.into();
+        let cfg: Config = raw.into_config().unwrap();
         assert!(cfg.defaults.credentials.is_empty());
     }
 }

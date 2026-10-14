@@ -81,16 +81,39 @@ ssh_agent = true                # forward the host SSH agent (git push/pull from
 image = "debian:bookworm-slim"  # base image for the template
 packages = ["git", "curl"]      # extra packages installed into the golden image
 setup = """                     # extra setup shell script, runs in the template
-cargo install --git https://github.com/some/demo-tool
+mkdir -p /tmp/smoke && cd /tmp/smoke && atomic init
+atomic agent enable --agent opencode
 """
 shell = "/bin/bash"             # what `democtl open` drops you into
 workspace = "/workspace"        # working directory for open/exec
+tools = ["node@lts", "opencode@latest"]  # mise tools installed into the image
+
+[build]                         # optional — Linux build machine (cross-compile)
+image = "debian:bookworm-slim"  # builder base image
+source = "/path/to/your/repo"   # host dir mounted at /src inside the builder
+tools = ["rust@stable"]         # mise tools installed in the builder first
+artifacts = ["atomic"]          # files under /build/artifacts/ to install
+script = """                    # runs in the builder VM (persistent, incremental)
+cargo build --release --manifest-path /src/Cargo.toml -p atomic-cli
+cp /build/target/release/atomic /build/artifacts/atomic
+"""
 
 [demos.checkout]
 port = 8410                     # FIXED host port — the demo's permanent URL
 # guest_port = 8080             # override [defaults].guest_port for this demo
 # credentials = { MY_KEY = { hosts = ["api.example.com"] } }  # replaces defaults for this demo
 ```
+
+Tooling is managed by [mise](https://mise.jdx.dev): `tools` specs are installed
+with `mise use -g` in the respective VM, and every template tool is symlinked
+to `/usr/local/bin/` so non-mise shells (and `democtl exec`) see it.
+
+Artifacts built by `[build]` land at `/usr/local/bin/<name>` in the golden
+image — `democtl build` runs `<artifact> --version` inside the template to
+verify each one. The builder machine persists (`democtl-builder-<dir>`), so
+toolchains and `target/` survive across builds; only the first build is slow
+(the atomic cold build took ~5 min; rebuilds are seconds).
+`democtl build --force` recreates both template and builder.
 
 ## Commands
 

@@ -1,4 +1,6 @@
-use crate::config::{LABEL_DEMO, LABEL_IDX, LABEL_MANAGED, LABEL_ROLE, ROLE_TEMPLATE};
+use crate::config::{
+    LABEL_DEMO, LABEL_IDX, LABEL_MANAGED, LABEL_ROLE, ROLE_BUILDER, ROLE_TEMPLATE,
+};
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -149,6 +151,10 @@ impl Machine {
 
     pub fn is_template(&self) -> bool {
         self.labels.get(LABEL_ROLE).map(String::as_str) == Some(ROLE_TEMPLATE)
+    }
+
+    pub fn is_builder(&self) -> bool {
+        self.labels.get(LABEL_ROLE).map(String::as_str) == Some(ROLE_BUILDER)
     }
 
     /// Creation index from the `idx` label, falling back to the trailing
