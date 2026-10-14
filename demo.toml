@@ -23,10 +23,14 @@ cp /build/target/release/atomic /build/artifacts/atomic
 """
 
 [template]
-# opencode 2.x ships as an npm package; node must be present for its
-# postinstall. Both are managed by mise; opencode is symlinked to
-# /usr/local/bin/opencode.
-tools = ["node@lts", "opencode@latest"]
+# Demo toolchains via mise; every binary lands on PATH through mirrored shims.
+# node is required by opencode 2.x (npm package postinstall).
+# build-essential provides cc so cargo can link.
+tools = ["node@lts", "opencode@latest", "go@latest", "rust@stable"]
+packages = [
+  "ca-certificates", "curl", "git", "jq", "less", "ripgrep", "unzip",
+  "build-essential",
+]
 # Wire opencode to atomic: the hooks install into ~/.config/opencode (global),
 # which persists in the golden image. `agent enable` needs a repo root, so
 # smoke-init one in /tmp first (that repo itself is throwaway).

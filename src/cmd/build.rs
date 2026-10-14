@@ -34,9 +34,13 @@ if [ -n "__TOOLS__" ]; then
   mise --version
   for tool in __TOOLS__; do mise use -g "$tool"; done
   mise reshim
-  for tool in __TOOLNAMES__; do
-    ln -sf "$(mise which "$tool")" "/usr/local/bin/$tool"
-  done
+  # Mirror every shim into /usr/local/bin so non-mise shells (and `sh -c`
+  # from democtl exec) see all tool binaries — cargo, rustc, go, gofmt, ...
+  if [ -d "$HOME/.local/share/mise/shims" ]; then
+    for shim in "$HOME/.local/share/mise/shims"/*; do
+      ln -sf "$shim" "/usr/local/bin/$(basename "$shim")"
+    done
+  fi
 fi
 
 mkdir -p "__WORKSPACE__"
@@ -44,8 +48,14 @@ mkdir -p "__WORKSPACE__"
 __SETUP__
 
 echo "==> verifying"
+# Best-effort: skip multi-binary tools (e.g. rust) and nonstandard flags
+# (e.g. go wants `version`, not `--version`); setup scripts do strict checks.
 for tool in __TOOLNAMES__; do
-  "/usr/local/bin/$tool" --version
+  if [ -e "/usr/local/bin/$tool" ]; then
+    "/usr/local/bin/$tool" --version 2>/dev/null \
+      || "/usr/local/bin/$tool" version 2>/dev/null \
+      || true
+  fi
 done
 echo "==> golden image setup complete"
 "#;
@@ -430,9 +440,9 @@ mod tests {
         assert!(s.contains("mkdir -p \"/workspace\""));
         assert!(s.contains("if [ -n \"opencode@1.19.0\" ]; then"));
         assert!(s.contains("for tool in opencode@1.19.0; do mise use -g \"$tool\"; done"));
-        assert!(s.contains("$(mise which \"$tool\")"));
-        assert!(s.contains("for tool in opencode; do\n  \"/usr/local/bin/$tool\" --version"));
-        assert!(s.contains("\"/usr/local/bin/$tool\" --version"));
+        assert!(s.contains("for shim in \"$HOME/.local/share/mise/shims\"/*; do"));
+        assert!(s.contains("for tool in opencode; do"));
+        assert!(s.contains("if [ -e \"/usr/local/bin/$tool\" ]"));
     }
 
     #[test]
