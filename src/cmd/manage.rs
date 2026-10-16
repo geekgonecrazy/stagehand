@@ -52,13 +52,24 @@ pub fn list(loaded: &Loaded, smol: &Smol) -> Result<()> {
         }
         let eff = loaded.config.effective(name).ok();
         match newest {
-            Some(m) => println!(
-                "{:<demo_w$}  {:<mach_w$}  {:<9}  http://localhost:{}",
-                name,
-                m.name,
-                state_cell(&m.state),
-                eff.as_ref().map(|e| e.host_port).unwrap_or(0),
-            ),
+            Some(m) => {
+                println!(
+                    "{:<demo_w$}  {:<mach_w$}  {:<9}  http://localhost:{}",
+                    name,
+                    m.name,
+                    state_cell(&m.state),
+                    eff.as_ref().map(|e| e.host_port).unwrap_or(0),
+                );
+                if machines.len() > 1 {
+                    println!(
+                        "{:<demo_w$}  {:<mach_w$}  {:<9}  {}",
+                        "",
+                        util::dim(&format!("+ {} older (preserved)", machines.len() - 1)),
+                        util::dim(""),
+                        util::dim("democtl rm --all to clean up"),
+                    );
+                }
+            }
             None => {
                 let url = eff
                     .map(|e| format!("http://localhost:{}", e.host_port))

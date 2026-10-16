@@ -352,8 +352,8 @@ mod tests {
         let loaded = test_loaded();
         let mut credentials = std::collections::BTreeMap::new();
         credentials.insert(
-            "ANTHROPIC_API_KEY".to_string(),
-            vec!["api.anthropic.com".to_string()],
+            "MY_API_KEY".to_string(),
+            vec!["api.example.com".to_string()],
         );
         let eff = crate::config::EffectiveDemo {
             name: "checkout".into(),
@@ -375,8 +375,8 @@ mod tests {
                 "--net", "-p", "8410:8080",
                 "--label", "democtl=1", "--label", "demo=checkout", "--label", "idx=1",
                 "--ssh-agent",
-                "--credential", "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY@api.anthropic.com",
-                "--secret-env", "ANTHROPIC_API_KEY=ANTHROPIC_API_KEY",
+                "--credential", "MY_API_KEY=MY_API_KEY@api.example.com",
+                "--secret-env", "MY_API_KEY=MY_API_KEY",
                 "--secret-env", "K=K",
             ]
         );

@@ -5,9 +5,9 @@
 [build]
 image = "debian:bookworm-slim"
 
-# What `democtl new` lands in — swap for any harness installed via tools
-# (e.g. "claude", "gemini"), or drop the line to land in a plain shell.
-entrypoint = "opencode"
+# What `democtl new` lands in — leave unset for a plain shell (then run
+# opencode by hand, or use: democtl new -- opencode).
+# entrypoint = "opencode"
 
 # Demo toolchains via mise; every binary lands on PATH through mirrored shims.
 # node is required by opencode 2.x (npm package postinstall).

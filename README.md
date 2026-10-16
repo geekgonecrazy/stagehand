@@ -100,10 +100,10 @@ ssh_agent = true               # forward the host SSH agent (git push/pull from 
 # Host-side credential bindings (recommended): the VM sees a placeholder,
 # the real value is substituted on HTTPS requests to the hosts you list —
 # and nowhere else. List every host the credential is actually sent to
-# (e.g. OpenRouter's API host is "openrouter.ai"), and have the env var
-# set in your shell whenever a machine is STARTED.
-[defaults.credentials.OPENROUTER_API_KEY]
-hosts = ["openrouter.ai"]
+# (the host must match what the client really connects to), and have the
+# env var set in your shell whenever a machine is STARTED.
+[defaults.credentials.MY_API_KEY]
+hosts = ["api.example.com"]
 
 # Plain secrets: the value IS visible inside the VM (for non-HTTPS tools).
 # secret_env = ["SOME_PLAIN_TOKEN"]
@@ -127,7 +127,7 @@ Artifacts built by `[build]` land at `/usr/local/bin/<name>` in the golden
 image — `democtl build` runs `<artifact> --version` inside the template to
 verify each one. The builder machine persists (`democtl-builder-<dir>`), so
 toolchains and `target/` survive across builds; only the first build is slow
-(the atomic cold build took ~5 min; rebuilds are seconds).
+(a cold Rust build took ~5 min; rebuilds are seconds).
 `democtl build --force` recreates both template and builder.
 
 ## Commands
@@ -162,7 +162,7 @@ democtl new checkout && democtl stop checkout   # dress rehearsal, machine stays
 On stage, per showing:
 
 ```sh
-democtl new                     # fresh VM + straight into opencode (no name needed)
+democtl new                     # fresh VM + straight into the entrypoint (no name needed)
 # ... run the demo; the webapp is at http://localhost:8410 ...
 #   start a webserver from another terminal, e.g.:
 #   democtl exec --detach -- python3 -m http.server 8080 --directory /workspace
@@ -193,7 +193,7 @@ democtl prune                   # delete all demo VMs (golden image is kept)
   `democtl build` recreates them.
 - The template machine `democtl-template-<dir>` is reused across builds; pass
   `--force` to rebuild it from scratch.
-- opencode is installed under `/usr/local/bin` in the image and starts in
+- Every `tools` binary is on PATH in the image; sessions start in
   `/workspace` (created empty in the golden image). Git works out of the box
   through the forwarded SSH agent.
 - Credential bindings resolve the real value from the environment of whatever

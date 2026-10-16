@@ -361,7 +361,7 @@ impl RawCredential {
         let hosts = self.hosts.unwrap_or_default();
         if hosts.is_empty() {
             bail!(
-                "credential `{name}` needs at least one host, e.g. `hosts = [\"api.anthropic.com\"]`"
+                "credential `{name}` needs at least one host, e.g. `hosts = [\"api.example.com\"]`"
             );
         }
         Ok(CredentialCfg { hosts })
@@ -561,11 +561,11 @@ guest_port = 8080                 # port your webapp listens on inside the VM
 # net = true                      # outbound networking (default true)
 # ssh_agent = true                # forward your SSH agent for git pushes (default true)
 
-[demos.checkout]
+[demos.my-demo]
 port = 8410                       # the demo is ALWAYS at http://localhost:8410
 
-[demos.search]
-port = 8420
+# [demos.another-demo]
+# port = 8420
 "#;
 
 #[cfg(test)]
@@ -575,7 +575,7 @@ mod tests {
     #[test]
     fn slug_is_clean() {
         assert_eq!(slug(Path::new("/a/b/My Project")), "my-project");
-        assert_eq!(slug(Path::new("/atomic")), "atomic");
+        assert_eq!(slug(Path::new("/myproj")), "myproj");
         assert_eq!(slug(Path::new("/")), "default");
     }
 
@@ -583,8 +583,8 @@ mod tests {
     fn parses_starter() {
         let raw: RawConfig = toml::from_str(STARTER).unwrap();
         let cfg: Config = raw.into_config().unwrap();
-        assert_eq!(cfg.demos.len(), 2);
-        let eff = cfg.effective("checkout").unwrap();
+        assert_eq!(cfg.demos.len(), 1);
+        let eff = cfg.effective("my-demo").unwrap();
         assert_eq!(eff.host_port, 8410);
         assert_eq!(eff.guest_port, 8080);
         assert!(eff.net);
@@ -600,14 +600,14 @@ mod tests {
     #[test]
     fn parses_credentials() {
         let raw: RawConfig = toml::from_str(
-            "[defaults.credentials.ANTHROPIC_API_KEY]\nhosts = [\"api.anthropic.com\"]\n\n[demos.y]\nport = 9000\n",
+            "[defaults.credentials.MY_API_KEY]\nhosts = [\"api.example.com\"]\n\n[demos.y]\nport = 9000\n",
         )
         .unwrap();
         let cfg: Config = raw.into_config().unwrap();
         let eff = cfg.effective("y").unwrap();
         assert_eq!(
-            eff.credentials.get("ANTHROPIC_API_KEY").map(Vec::as_slice),
-            Some(["api.anthropic.com".to_string()].as_slice())
+            eff.credentials.get("MY_API_KEY").map(Vec::as_slice),
+            Some(["api.example.com".to_string()].as_slice())
         );
         // per-demo credentials replace defaults
         let raw: RawConfig = toml::from_str(
