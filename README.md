@@ -122,6 +122,8 @@ into it at `/usr/local/bin/`. Demo VMs are clones of that image.
 Tooling is managed by [mise](https://mise.jdx.dev): `tools` specs are installed
 with `mise use -g` in the respective VM, and every template tool is symlinked
 to `/usr/local/bin/` so non-mise shells (and `stagehand exec`) see it.
+**All of this happens inside the VMs — the host never needs mise; it only
+needs [smolvm](https://smolmachines.com).**
 
 Artifacts built by `[build]` land at `/usr/local/bin/<name>` in the golden
 image — `stagehand build` runs `<artifact> --version` inside the template to
