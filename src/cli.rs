@@ -17,6 +17,23 @@ pub struct Cli {
     pub cmd: Cmd,
 }
 
+impl Cmd {
+    /// The optional demo name carried by per-demo commands.
+    pub fn demo_name(&self) -> Option<String> {
+        match self {
+            Cmd::New { demo, .. }
+            | Cmd::Open { demo, .. }
+            | Cmd::Exec { demo, .. }
+            | Cmd::Url { demo }
+            | Cmd::Start { demo }
+            | Cmd::Stop { demo }
+            | Cmd::Reset { demo }
+            | Cmd::Rm { demo, .. } => demo.clone(),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Cmd {
     /// Write a starter demo.toml in the current directory
@@ -31,8 +48,9 @@ pub enum Cmd {
 
     /// Start a fresh VM for a demo from the golden image
     New {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional — uses the default, last
+        /// used, or the only configured demo)
+        demo: Option<String>,
 
         /// Attach to opencode immediately after starting
         #[arg(long)]
@@ -41,8 +59,8 @@ pub enum Cmd {
 
     /// Attach to the most recent machine of a demo
     Open {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
 
         /// Attach to opencode instead of a shell
         #[arg(long)]
@@ -55,8 +73,8 @@ pub enum Cmd {
 
     /// Run a command in the most recent machine of a demo
     Exec {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
 
         /// Run the command in the background (e.g. a demo webserver)
         #[arg(long)]
@@ -69,20 +87,20 @@ pub enum Cmd {
 
     /// Print the URL of the most recent machine of a demo
     Url {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
     },
 
     /// Start the most recent machine of a demo (resume a preserved session)
     Start {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
     },
 
     /// Stop the most recent machine of a demo (session is preserved on disk)
     Stop {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
     },
 
     /// List demos, their machines, states and URLs
@@ -91,15 +109,15 @@ pub enum Cmd {
 
     /// Delete the most recent machine of a demo and start a fresh one
     Reset {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
     },
 
     /// Delete machines of a demo
     #[command(alias = "delete")]
     Rm {
-        /// Demo name from demo.toml
-        demo: String,
+        /// Demo name from demo.toml (optional)
+        demo: Option<String>,
 
         /// Delete every machine of this demo, not just the most recent
         #[arg(long)]

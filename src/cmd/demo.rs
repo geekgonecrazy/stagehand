@@ -145,6 +145,20 @@ pub fn spawn_fresh(
 ) -> Result<(String, Vec<String>)> {
     require_golden(loaded)?;
     let existing = smol.managed_for_demo(&eff.name)?;
+
+    // Only one live instance per demo: the fixed host port can't be bound
+    // twice. Archive (stop) any previous run — it stays preserved on disk.
+    for m in existing.iter().filter(|m| m.running()) {
+        println!(
+            "{}",
+            util::dim(&format!(
+                "==> archiving previous run {} (session preserved)",
+                m.name
+            ))
+        );
+        smol.run_inherit(&["machine", "stop", "--name", &m.name])?;
+    }
+
     let mut idx = existing
         .iter()
         .filter_map(|m: &Machine| m.idx())
@@ -373,6 +387,7 @@ mod tests {
                 },
                 build: None,
                 defaults: crate::config::DefaultsCfg {
+                    demo: None,
                     net: true,
                     ssh_agent: true,
                     secret_env: vec![],

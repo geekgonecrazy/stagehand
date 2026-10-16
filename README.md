@@ -10,12 +10,18 @@ on your Mac.
 
 ```
 democtl build            # once: template VM → golden image (opencode preinstalled)
-democtl new checkout     # per run: fresh VM, http://localhost:8410 is live
-democtl open checkout    # attach: opencode (or a shell) inside the VM
-democtl stop checkout    # done: VM stopped, session preserved
-democtl start checkout   # later: same machine back at http://localhost:8410
+democtl new              # fresh VM, fixed port, ready to demo
+democtl open             # attach: opencode (or a shell) inside the VM
+democtl stop             # done: VM stopped, session preserved
+democtl start            # later: same machine back at the same URL
 democtl prune            # after the conference: delete every demo VM
 ```
+
+Demo names are optional: unnamed commands resolve to the `[defaults] demo`
+pin, else the demo you last touched, else the only configured demo. Pass a
+name (`democtl new search`) when you mean a different one. `democtl new`
+archives any still-running run of the same demo first (session preserved),
+so the fixed port is always free.
 
 ## Why this shape
 
@@ -62,6 +68,7 @@ democtl build                   # ~5 min once: installs packages + opencode in a
 
 ```toml
 [defaults]
+demo = "checkout"               # what an unnamed `democtl new`/`open`/`stop` means
 guest_port = 8080               # where your webapp listens inside the VM
 
 # Host-side credential bindings (recommended): the VM sees a placeholder,
@@ -147,11 +154,11 @@ democtl new checkout && democtl stop checkout   # dress rehearsal, machine stays
 On stage, per showing:
 
 ```sh
-democtl new checkout --attach   # fresh VM + straight into opencode
+democtl new --attach            # fresh VM + straight into opencode (no name needed)
 # ... run the demo; the webapp is at http://localhost:8410 ...
 #   start a webserver from another terminal, e.g.:
-#   democtl exec checkout --detach -- python3 -m http.server 8080 --directory /workspace
-democtl stop checkout           # VM off, nothing running, session archived
+#   democtl exec --detach -- python3 -m http.server 8080 --directory /workspace
+democtl stop                    # VM off, nothing running, session archived
 ```
 
 Questions from the audience about yesterday's run?

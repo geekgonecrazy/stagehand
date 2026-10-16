@@ -32,6 +32,8 @@ pub struct TemplateCfg {
 
 #[derive(Debug, Clone)]
 pub struct DefaultsCfg {
+    /// Demo used when a command is given without an explicit name.
+    pub demo: Option<String>,
     pub net: bool,
     pub ssh_agent: bool,
     pub secret_env: Vec<String>,
@@ -215,9 +217,79 @@ struct RawTemplate {
     workspace: Option<String>,
 }
 
+impl Loaded {
+    pub fn state_path(&self) -> PathBuf {
+        self.dot_dir.join("state.json")
+    }
+
+    /// The demo last touched by an unnamed-capable command, if still configured.
+    pub fn read_last_demo(&self) -> Option<String> {
+        let raw = std::fs::read_to_string(self.state_path()).ok()?;
+        let state: State = serde_json::from_str(&raw).ok()?;
+        state.last_demo
+    }
+
+    /// Remember the demo for future unnamed commands. Failure to persist is
+    /// non-fatal (the command already succeeded).
+    pub fn write_last_demo(&self, demo: &str) {
+        if let Err(e) = std::fs::create_dir_all(&self.dot_dir) {
+            eprintln!("warning: could not create {}: {e}", self.dot_dir.display());
+            return;
+        }
+        let state = State { last_demo: Some(demo.to_string()) };
+        if let Err(e) = std::fs::write(self.state_path(), serde_json::to_string(&state).unwrap_or_default()) {
+            eprintln!("warning: could not update {}: {e}", self.state_path().display());
+        }
+    }
+
+    /// Which demo a command means when the name is omitted:
+    /// explicit name → `[defaults] demo` pin → last used → the only demo.
+    pub fn resolve_demo(&self, explicit: Option<&str>) -> Result<String> {
+        if let Some(name) = explicit {
+            self.config.demo(name)?;
+            return Ok(name.to_string());
+        }
+        if let Some(pinned) = &self.config.defaults.demo {
+            if self.config.demos.contains_key(pinned) {
+                return Ok(pinned.clone());
+            }
+            bail!(
+                "[defaults] demo = \"{pinned}\" is not a configured demo — configured: {}",
+                self.demo_names()
+            );
+        }
+        if let Some(last) = self.read_last_demo() {
+            if self.config.demos.contains_key(&last) {
+                return Ok(last);
+            }
+        }
+        if self.config.demos.len() == 1 {
+            return Ok(self.config.demos.keys().next().unwrap().clone());
+        }
+        bail!(
+            "multiple demos configured ({}) and no default — pass one (democtl new <name>) or set [defaults] demo = \"...\"",
+            self.demo_names()
+        );
+    }
+
+    fn demo_names(&self) -> String {
+        if self.config.demos.is_empty() {
+            "(none)".to_string()
+        } else {
+            self.config.demos.keys().cloned().collect::<Vec<_>>().join(", ")
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug, Default)]
+struct State {
+    last_demo: Option<String>,
+}
+
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 struct RawDefaults {
+    demo: Option<String>,
     net: Option<bool>,
     ssh_agent: Option<bool>,
     secret_env: Option<Vec<String>>,
@@ -303,6 +375,7 @@ impl RawConfig {
             },
             build,
             defaults: DefaultsCfg {
+                demo: d.demo,
                 net: d.net.unwrap_or(true),
                 ssh_agent: d.ssh_agent.unwrap_or(true),
                 secret_env: d.secret_env.unwrap_or_default(),
@@ -498,5 +571,42 @@ mod tests {
         let raw: RawConfig = toml::from_str("[defaults.credentials.X]\n").unwrap();
         let cfg: Config = raw.into_config().unwrap();
         assert!(cfg.defaults.credentials.is_empty());
+    }
+
+    #[test]
+    fn resolve_demo_prefers_explicit_then_pin_then_last_used_then_single() {
+        let dir = std::env::temp_dir().join(format!("democtl-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mk = |toml_text: &str| {
+            let path = dir.join("demo.toml");
+            std::fs::write(&path, toml_text).unwrap();
+            load(Some(&path)).unwrap()
+        };
+
+        // explicit name always wins
+        let loaded = mk("[demos.a]\nport=1\n[demos.b]\nport=2\n");
+        assert_eq!(loaded.resolve_demo(Some("b")).unwrap(), "b");
+
+        // ambiguous without pin/last-used
+        assert!(loaded.resolve_demo(None).is_err());
+
+        // last used remembered and honored
+        loaded.write_last_demo("a");
+        assert_eq!(loaded.resolve_demo(None).unwrap(), "a");
+
+        // pin beats last used
+        let loaded = mk("[defaults]\ndemo = \"b\"\n[demos.a]\nport=1\n[demos.b]\nport=2\n");
+        assert_eq!(loaded.resolve_demo(None).unwrap(), "b");
+
+        // single demo needs nothing
+        let loaded = mk("[demos.only]\nport=1\n");
+        assert_eq!(loaded.resolve_demo(None).unwrap(), "only");
+
+        // stale last-used is ignored
+        let loaded = mk("[demos.only]\nport=1\n");
+        loaded.write_last_demo("deleted");
+        assert_eq!(loaded.resolve_demo(None).unwrap(), "only");
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

@@ -50,6 +50,8 @@ atomic agent status || true
 """
 
 [defaults]
+# what an unnamed `democtl new` / `open` / `stop` means
+demo = "checkout"
 guest_port = 8080                 # port the webapp listens on inside the VM
 
 # Credentials bound HOST-SIDE: the VM only ever sees a SMOL_PLACEHOLDER_*
