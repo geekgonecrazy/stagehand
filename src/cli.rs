@@ -46,15 +46,15 @@ pub enum Cmd {
         force: bool,
     },
 
-    /// Start a fresh VM for a demo from the golden image
+    /// Start a fresh VM for a demo from the golden image and attach to it
     New {
         /// Demo name from demo.toml (optional — uses the default, last
         /// used, or the only configured demo)
         demo: Option<String>,
 
-        /// Attach to opencode immediately after starting
+        /// Start the VM but don't attach to opencode
         #[arg(long)]
-        attach: bool,
+        no_attach: bool,
     },
 
     /// Attach to the most recent machine of a demo

@@ -10,8 +10,9 @@ on your Mac.
 
 ```
 democtl build            # once: template VM → golden image (opencode preinstalled)
-democtl new              # fresh VM, fixed port, ready to demo
-democtl open             # attach: opencode (or a shell) inside the VM
+democtl new              # fresh VM, fixed port, lands you inside opencode
+democtl new --no-attach  # start it without attaching
+democtl open             # re-attach later (boots it if stopped; session intact)
 democtl stop             # done: VM stopped, session preserved
 democtl start            # later: same machine back at the same URL
 democtl prune            # after the conference: delete every demo VM
@@ -154,7 +155,7 @@ democtl new checkout && democtl stop checkout   # dress rehearsal, machine stays
 On stage, per showing:
 
 ```sh
-democtl new --attach            # fresh VM + straight into opencode (no name needed)
+democtl new                     # fresh VM + straight into opencode (no name needed)
 # ... run the demo; the webapp is at http://localhost:8410 ...
 #   start a webserver from another terminal, e.g.:
 #   democtl exec --detach -- python3 -m http.server 8080 --directory /workspace
