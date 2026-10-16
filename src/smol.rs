@@ -220,13 +220,13 @@ mod tests {
     #[test]
     fn parses_ls_json() {
         let json = r#"[
-          {"name":"democtl-my-demo-1","state":"running","labels":{"democtl":"1","demo":"checkout","idx":"1"},"created_at":1791492903},
+          {"name":"democtl-my-demo-1","state":"running","labels":{"democtl":"1","demo":"my-demo","idx":"1"},"created_at":1791492903},
           {"name":"unrelated","state":"stopped","labels":{},"created_at":1}
         ]"#;
         let ms: Vec<Machine> = serde_json::from_str(json).unwrap();
         assert_eq!(ms.len(), 2);
         assert!(ms[0].is_managed());
-        assert_eq!(ms[0].demo(), Some("checkout"));
+        assert_eq!(ms[0].demo(), Some("my-demo"));
         assert!(!ms[1].is_managed());
     }
 
