@@ -356,7 +356,7 @@ mod tests {
             vec!["api.example.com".to_string()],
         );
         let eff = crate::config::EffectiveDemo {
-            name: "checkout".into(),
+            name: "my-demo".into(),
             host_port: 8410,
             guest_port: 8080,
             net: true,
@@ -366,14 +366,14 @@ mod tests {
             secret_env: vec!["K".into()],
             credentials,
         };
-        let a = create_args(&loaded, &eff, "democtl-checkout-1", 1, &["K=K".to_string()]);
+        let a = create_args(&loaded, &eff, "democtl-my-demo-1", 1, &["K=K".to_string()]);
         let s: Vec<&str> = a.iter().map(String::as_str).collect();
         assert_eq!(
             s,
             vec![
-                "machine", "create", "--name", "democtl-checkout-1", "--image", "/p/.democtl/rootfs",
+                "machine", "create", "--name", "democtl-my-demo-1", "--image", "/p/.democtl/rootfs",
                 "--net", "-p", "8410:8080",
-                "--label", "democtl=1", "--label", "demo=checkout", "--label", "idx=1",
+                "--label", "democtl=1", "--label", "demo=my-demo", "--label", "idx=1",
                 "--ssh-agent",
                 "--credential", "MY_API_KEY=MY_API_KEY@api.example.com",
                 "--secret-env", "MY_API_KEY=MY_API_KEY",

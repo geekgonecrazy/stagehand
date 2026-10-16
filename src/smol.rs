@@ -158,7 +158,7 @@ impl Machine {
     }
 
     /// Creation index from the `idx` label, falling back to the trailing
-    /// number in the machine name (`democtl-checkout-3` → 3).
+    /// number in the machine name (`democtl-my-demo-3` → 3).
     pub fn idx(&self) -> Option<i64> {
         if let Some(i) = self.labels.get(LABEL_IDX).and_then(|v| v.parse().ok()) {
             return Some(i);
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn parses_ls_json() {
         let json = r#"[
-          {"name":"democtl-checkout-1","state":"running","labels":{"democtl":"1","demo":"checkout","idx":"1"},"created_at":1791492903},
+          {"name":"democtl-my-demo-1","state":"running","labels":{"democtl":"1","demo":"checkout","idx":"1"},"created_at":1791492903},
           {"name":"unrelated","state":"stopped","labels":{},"created_at":1}
         ]"#;
         let ms: Vec<Machine> = serde_json::from_str(json).unwrap();
