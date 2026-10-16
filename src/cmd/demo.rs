@@ -1,7 +1,7 @@
 use crate::cmd::target;
 use crate::config::{EffectiveDemo, Loaded, LABEL_DEMO, LABEL_IDX, LABEL_MANAGED};
 use crate::smol::{exec_args, Machine, Smol};
-use crate::util::{self, ident};
+use crate::util::{self};
 use anyhow::{bail, Context, Result};
 
 /// Resolve `secret_env` entries that exist in the host environment to
@@ -17,8 +17,8 @@ fn secret_refs(eff: &crate::config::EffectiveDemo) -> (Vec<String>, Vec<String>)
     (refs, missing)
 }
 
-fn machine_name(demo: &str, idx: i64) -> String {
-    format!("stagehand-{}-{idx}", ident(demo))
+fn machine_name(slug: &str, idx: i64) -> String {
+    format!("{slug}-{idx}")
 }
 
 /// Host env vars that must be present when the machine is started:
@@ -144,7 +144,7 @@ pub fn spawn_fresh(
     eff: &crate::config::EffectiveDemo,
 ) -> Result<(String, Vec<String>)> {
     require_golden(loaded)?;
-    let existing = smol.managed_for_demo(&eff.name)?;
+    let existing = smol.managed_for_project(&loaded.slug)?;
 
     // Only one live instance per demo: the fixed host port can't be bound
     // twice. Archive (stop) any previous run — it stays preserved on disk.
@@ -186,58 +186,128 @@ pub fn spawn_fresh(
     let args = create_args(loaded, eff, &name, idx, &secrets);
     smol.run_inherit(&refs(&args))
         .context("creating demo machine")?;
-    smol.run_inherit(&["machine", "start", "--name", &name])
+    start_demo_machine(smol, &name, &eff.name)
         .context("starting demo machine")?;
+
+    // Bring in demo folders: fresh copies, host originals untouched.
+    bring_includes(loaded, smol, eff, &name)?;
 
     Ok((name, secrets))
 }
 
+/// Extract the holder machine from smolvm's port-conflict error
+/// ("host port 8410 is already in use by running machine 'X'").
+fn port_conflict_holder(msg: &str) -> Option<String> {
+    let marker = "already in use by running machine '";
+    let start = msg.find(marker)? + marker.len();
+    let rest = &msg[start..];
+    let end = rest.find('\'')?;
+    Some(rest[..end].to_string())
+}
+
+/// Start a demo machine. If the fixed host port is still held by a previous
+/// run (label drift, resurrected machines, …), archive the holder and retry
+/// once. Refuses to touch machines stagehand doesn't manage.
+fn start_demo_machine(smol: &Smol, name: &str, demo: &str) -> Result<()> {
+    let attempt = smol.capture_both(&["machine", "start", "--name", name]);
+    if attempt.is_ok() {
+        return Ok(());
+    }
+    let msg = format!("{:#}", attempt.unwrap_err());
+    let holder = port_conflict_holder(&msg).ok_or_else(|| anyhow::anyhow!("{msg}"))?;
+    let holder_machine = smol
+        .machines()?
+        .into_iter()
+        .find(|m| m.name == holder)
+        .with_context(|| format!("port is held by `{holder}`, which stagehand doesn't know"))?;
+    if !holder_machine.is_managed() || holder_machine.is_template() || holder_machine.is_builder() {
+        bail!(
+            "host port is held by `{holder}`, which is not a stagehand demo machine — \
+             stop it manually (`smolvm machine stop {holder}`) and retry"
+        );
+    }
+    util::warn(&format!(
+        "port still held by previous run `{holder}` — archiving it (session preserved) and retrying"
+    ));
+    smol.run_inherit(&["machine", "stop", "--name", &holder])?;
+    smol.capture_both(&["machine", "start", "--name", name]).map(|_| ())
+        .with_context(|| format!("starting demo machine after archiving {holder}"))?;
+    let _ = demo;
+    Ok(())
+}
+
+fn humansize(n: u64) -> String {
+    let mb = n as f64 / (1024.0 * 1024.0);
+    if mb >= 1.0 {
+        format!("{mb:.1} MiB")
+    } else {
+        format!("{:.0} KiB", n as f64 / 1024.0)
+    }
+}
+
 fn print_ready(eff: &crate::config::EffectiveDemo, name: &str) {
-    let port = format!("http://localhost:{}", eff.host_port);
     println!(
-        "\n{} demo `{}` is live as {}\n  url    {port}   (host {} → guest {})\n  attach {}\n  stop   {}",
+        "\n{} demo is live as {} at http://localhost:{}  (host {} → guest {})",
         util::green("✓"),
-        eff.name,
         util::bold(name),
         eff.host_port,
+        eff.host_port,
         eff.guest_port,
-        util::bold(&format!("stagehand open {}", eff.name)),
-        util::bold(&format!("stagehand stop {}", eff.name)),
     );
+}
+
+/// Attach to a machine: `-- cmd` override, else the image entrypoint.
+fn attach(
+    loaded: &Loaded,
+    smol: &Smol,
+    machine: &str,
+    secrets: &[String],
+    cmd: &[String],
+) -> Result<()> {
+    let build = &loaded.config.build;
+    let program: Vec<String> = if !cmd.is_empty() {
+        cmd.to_vec()
+    } else {
+        build.entrypoint_programs()
+    };
+    smol.run_inherit(&refs(&exec_args(
+        machine,
+        &build.workspace,
+        true,
+        false,
+        secrets,
+        &program,
+    )))
+}
+
+/// Strike the set: stop the machine, keep the session on disk.
+fn strike(smol: &Smol, machine: &str) -> Result<()> {
+    smol.run_inherit(&["machine", "stop", "--name", machine])?;
+    util::ok(&format!(
+        "{machine} stopped — session preserved (`stagehand resume` to jump back in)"
+    ));
+    Ok(())
 }
 
 pub fn new(
     loaded: &Loaded,
     smol: &Smol,
-    demo: &str,
     no_attach: bool,
     cmd: &[String],
 ) -> Result<()> {
-    let eff = loaded.config.effective(demo)?;
-    let build = &loaded.config.build;
+    let eff = loaded.effective()?;
     let (name, secrets) = spawn_fresh(loaded, smol, &eff)?;
     print_ready(&eff, &name);
-    if !no_attach {
-        // Landing target: explicit `-- cmd` > image entrypoint (shell default)
-        let program: Vec<String> = if !cmd.is_empty() {
-            cmd.to_vec()
-        } else {
-            build.entrypoint_programs()
-        };
-        smol.run_inherit(&refs(&exec_args(
-            &name,
-            &build.workspace,
-            true,
-            false,
-            &secrets,
-            &program,
-        )))?;
-        util::warn(&format!(
-            "machine still running — `stagehand stop {}` when the demo is done",
-            eff.name
-        ));
+    if no_attach {
+        util::warn("running without attach — `stagehand resume` to step in, `stagehand stop` to halt");
+        return Ok(());
     }
-    Ok(())
+    let r = attach(loaded, smol, &name, &secrets, cmd);
+    // Exiting the session strikes the set — always.
+    if let Err(e) = strike(smol, &name) {
+        util::warn(&format!("could not stop {name}: {e}"));
+    }
+    r
 }
 
 fn ensure_running(smol: &Smol, m: &Machine, eff: &EffectiveDemo) -> Result<()> {
@@ -252,42 +322,12 @@ fn ensure_running(smol: &Smol, m: &Machine, eff: &EffectiveDemo) -> Result<()> {
     smol.run_inherit(&["machine", "start", "--name", &m.name])
 }
 
-pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, cmd: &[String]) -> Result<()> {
-    let eff = loaded.config.effective(demo)?;
-    let m = target(smol, demo)?;
-    ensure_running(smol, &m, &eff)?;
-
-    let (secrets, _) = secret_refs(&eff);
-    let build = &loaded.config.build;
-    // Command override > image entrypoint (shell default)
-    let program: Vec<String> = if !cmd.is_empty() {
-        cmd.to_vec()
-    } else {
-        build.entrypoint_programs()
-    };
-    smol.run_inherit(&refs(&exec_args(
-        &m.name,
-        &build.workspace,
-        true,
-        false,
-        &secrets,
-        &program,
-    )))?;
-    if m.running() {
-        util::warn(&format!(
-            "machine still running — `stagehand stop {}` when the demo is done",
-            eff.name
-        ));
-    }
-    Ok(())
-}
-
-pub fn exec(loaded: &Loaded, smol: &Smol, demo: &str, detach: bool, cmd: &[String]) -> Result<()> {
+pub fn exec(loaded: &Loaded, smol: &Smol, detach: bool, cmd: &[String]) -> Result<()> {
     if cmd.is_empty() {
-        bail!("nothing to run — try: stagehand exec {demo} -- ls -la");
+        bail!("nothing to run — try: stagehand exec -- ls -la");
     }
-    let eff = loaded.config.effective(demo)?;
-    let m = target(smol, demo)?;
+    let eff = loaded.effective()?;
+    let m = target(smol, loaded)?;
     ensure_running(smol, &m, &eff)?;
     let (secrets, _) = secret_refs(&eff);
     let interactive = !detach && std::io::IsTerminal::is_terminal(&std::io::stdin());
@@ -302,9 +342,9 @@ pub fn exec(loaded: &Loaded, smol: &Smol, demo: &str, detach: bool, cmd: &[Strin
     )))
 }
 
-pub fn url(loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
-    let eff = loaded.config.effective(demo)?;
-    let m = smol.newest_for_demo(demo)?;
+pub fn url(loaded: &Loaded, smol: &Smol) -> Result<()> {
+    let eff = loaded.effective()?;
+    let m = smol.newest_for_project(&loaded.slug)?;
     println!("http://localhost:{}", eff.host_port);
     if let Some(m) = m {
         eprintln!(
@@ -312,25 +352,67 @@ pub fn url(loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
             util::dim(&format!("{} is {}", m.name, m.state))
         );
     } else {
-        eprintln!("{}", util::dim(&format!("no machine yet — `stagehand new {demo}`")));
+        eprintln!("{}", util::dim("no machine yet — `stagehand new`"));
     }
     Ok(())
 }
 
-pub fn start(loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
-    let eff = loaded.config.effective(demo)?;
-    let m = target(smol, demo)?;
-    if m.running() {
-        util::warn(&format!("{} is already running", m.name));
-        return Ok(());
-    }
+/// Resume the most recent machine, land inside it, and strike it on exit.
+pub fn resume(
+    loaded: &Loaded,
+    smol: &Smol,
+    session: Option<u32>,
+    cmd: &[String],
+) -> Result<()> {
+    let eff = loaded.effective()?;
+    let machines = smol.managed_for_project(&eff.name)?;
+    let m = match session {
+        Some(n) => {
+            machines
+                .iter()
+                .find(|m| m.idx() == Some(n as i64))
+                .cloned()
+                .ok_or_else(|| {
+                    let available: Vec<String> = machines
+                        .iter()
+                        .filter_map(|m| m.idx())
+                        .map(|i| i.to_string())
+                        .collect();
+                    anyhow::anyhow!(
+                        "no session {n} — preserved sessions: {}",
+                        if available.is_empty() { "(none)".to_string() } else { available.join(", ") }
+                    )
+                })?
+        }
+        None => machines.last().cloned().ok_or_else(|| {
+            anyhow::anyhow!("no preserved sessions yet — `stagehand new` first")
+        })?,
+    };
     ensure_running(smol, &m, &eff)?;
     print_ready(&eff, &m.name);
-    Ok(())
+    let (secrets, _) = secret_refs(&eff);
+    let r = attach(loaded, smol, &m.name, &secrets, cmd);
+    // Exiting the session strikes the set — always.
+    if let Err(e) = strike(smol, &m.name) {
+        util::warn(&format!("could not stop {}: {e}", m.name));
+    }
+    r
 }
 
-pub fn stop(_loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
-    let m = target(smol, demo)?;
+pub fn stop(loaded: &Loaded, smol: &Smol) -> Result<()> {
+    let eff = loaded.effective()?;
+    let machines = smol.managed_for_project(&eff.name)?;
+    if machines.is_empty() {
+        util::warn("no machines yet — `stagehand new`");
+        return Ok(());
+    }
+    // Stop whichever session is running (only one can hold the port).
+    let m = machines
+        .iter()
+        .find(|m| m.running())
+        .or_else(|| machines.last())
+        .cloned()
+        .unwrap();
     if !m.running() {
         util::warn(&format!("{} is already stopped (session preserved)", m.name));
         return Ok(());
@@ -340,6 +422,131 @@ pub fn stop(_loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
         "{} stopped — session preserved on disk, port stays reserved for this demo",
         m.name
     ));
+    Ok(())
+}
+
+/// Resolve an include path: absolute as-is, relative to the demo.toml dir.
+fn resolve_include(dir: &std::path::Path, path: &str) -> std::path::PathBuf {
+    let p = std::path::Path::new(path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        dir.join(p)
+    }
+}
+
+/// Copy a host folder into the VM's workspace: tar on the host, `machine cp`
+/// the tarball, extract inside. A copy, never a mount — the demo can mangle
+/// it freely and the host original doesn't change.
+fn copy_include(
+    smol: &Smol,
+    machine: &str,
+    workspace: &str,
+    src: &std::path::Path,
+) -> Result<()> {
+    let name = src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .context("include path has no file name (trailing slash?)")?
+        .to_string();
+    let tgz = std::env::temp_dir().join(format!(
+        "stagehand-include-{}-{}.tgz",
+        std::process::id(),
+        name
+    ));
+    // Host tar directly (NOT via smolvm) — we're packaging a host folder.
+    let status = std::process::Command::new("tar")
+        .args(["-czf"])
+        .arg(&tgz)
+        .args(["-C"])
+        .arg(src.parent().unwrap_or(src))
+        .arg(&name)
+        .status()
+        .context("running tar (host)")?;
+    if !status.success() {
+        bail!("tar failed while packaging include {}", src.display());
+    }
+
+    let size = humansize(std::fs::metadata(&tgz).map(|m| m.len()).unwrap_or(0));
+    println!(
+        "{}",
+        util::dim(&format!("==> bringing in {name} ({size}) — copied, not mounted"))
+    );
+    let remote_tgz = format!("/tmp/stagehand-include-{name}.tgz");
+    // `machine cp` right after `machine start` can silently no-op (agent's
+    // transfer channel not up yet, despite the progress bar) — verify the
+    // file landed guest-side and retry the copy if not.
+    let mut landed = false;
+    for attempt in 1..=3 {
+        smol.run_inherit(&[
+            "machine",
+            "cp",
+            &tgz.to_string_lossy(),
+            &format!("{machine}:{remote_tgz}"),
+        ])?;
+        if smol
+            .capture_both(&["machine", "exec", "--name", machine, "--", "test", "-f", &remote_tgz])
+            .is_ok()
+        {
+            landed = true;
+            break;
+        }
+        util::warn(&format!("include upload didn't land (attempt {attempt}/3) — retrying"));
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    let _ = std::fs::remove_file(&tgz);
+    if !landed {
+        bail!("include {name} never landed in the VM after 3 attempts");
+    }
+    smol.run_inherit(&[
+        "machine",
+        "exec",
+        "--name",
+        machine,
+        "--",
+        "sh",
+        "-c",
+        &format!(
+            "rm -rf '{ws}/{name}' && tar xzf '{tgz}' -C '{ws}'",
+            ws = workspace,
+            tgz = remote_tgz
+        ),
+    ])?;
+    Ok(())
+}
+
+/// Copy every `include` folder for a demo into the fresh VM's workspace.
+fn bring_includes(
+    loaded: &Loaded,
+    smol: &Smol,
+    eff: &crate::config::EffectiveDemo,
+    machine: &str,
+) -> Result<()> {
+    if eff.include.is_empty() {
+        return Ok(());
+    }
+    let workspace = &loaded.config.build.workspace;
+    let mut seen = std::collections::BTreeSet::new();
+    for path in &eff.include {
+        let src = resolve_include(&loaded.dir, path);
+        if !src.is_dir() {
+            bail!("include path is not a directory: {}", src.display());
+        }
+        let name = src
+            .file_name()
+            .and_then(|n| n.to_str())
+            .context("include path has no file name")?;
+        if !seen.insert(name.to_string()) {
+            bail!("two includes share the folder name `{name}` — rename one");
+        }
+        copy_include(smol, machine, workspace, &src)?;
+    }
+    println!(
+        "{}",
+        util::dim(&format!(
+            "==> includes copied into {workspace} (fresh copy every `stagehand new`)"
+        ))
+    );
     Ok(())
 }
 
@@ -365,6 +572,7 @@ mod tests {
             mem_mib: None,
             secret_env: vec!["K".into()],
             credentials,
+            include: vec![],
         };
         let a = create_args(&loaded, &eff, "stagehand-my-demo-1", 1, &["K=K".to_string()]);
         let s: Vec<&str> = a.iter().map(String::as_str).collect();
@@ -396,7 +604,6 @@ mod tests {
                 },
                 builder: None,
                 defaults: crate::config::DefaultsCfg {
-                    demo: None,
                     net: true,
                     ssh_agent: true,
                     secret_env: vec![],
@@ -405,9 +612,15 @@ mod tests {
                     cpus: None,
                     mem_mib: None,
                 },
-                demos: Default::default(),
+                demo: crate::config::DemoCfg {
+                    name: None,
+                    port: Some(8410),
+                    include: None,
+                },
             },
             dot_dir: "/p/.stagehand".into(),
+            dir: "/p".into(),
+            slug: "p".into(),
             template_name: "stagehand-template-p".into(),
             golden_path: "/p/.stagehand/golden.smolmachine".into(),
             rootfs_path: "/p/.stagehand/rootfs".into(),
@@ -418,7 +631,7 @@ mod tests {
 
     #[test]
     fn machine_names_are_ident_safe() {
-        assert_eq!(machine_name("My Demo!", 3), "stagehand-my-demo-3");
+        assert_eq!(machine_name("my-demo", 3), "my-demo-3");
         assert_eq!(crate::config::ROLE_TEMPLATE, "template");
     }
 }

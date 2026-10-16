@@ -1,12 +1,46 @@
-# stagehand configuration — one section per conference demo.
-# Every demo gets a FIXED host port: the demo is always at the same URL.
+# stagehand configuration — this file IS the demo.
+# Demo identity + defaults first, then the golden image recipe.
+
+# Machine names derive from this (`atomic-demo-1`, `atomic-demo-2`, …).
+# Drop it and the demo.toml directory name is used instead.
+name = "atomic-demo"
+
+port = 8410                       # ALWAYS http://localhost:8410
+# include = ["/path/to/repo"]     # folders COPIED into the VM at `stagehand new`
+#                                 # time — fresh copy every run, the host
+#                                 # original is never mounted or modified
+
+[defaults]
+guest_port = 8080                 # port the webapp listens on inside the VM
+
+# Credentials bound HOST-SIDE: the VM only ever sees a SMOLPLACEHOLDER_*
+# value; smolvm substitutes the real value from your shell env on HTTPS
+# requests to the hosts listed below. The secret never enters the VM.
+#
+# List EVERY host the credential is actually sent to — requests to any
+# host not listed pass through with the placeholder unchanged (and would
+# fail auth). The host must match what the client really connects to,
+# e.g. OpenRouter's API host is "openrouter.ai".
+#
+# Set the var in your shell when a machine is STARTED.
+[defaults.credentials.OPENROUTER_API_KEY]
+hosts = ["openrouter.ai"]
+
+# Add more bindings as needed, e.g.:
+# [defaults.credentials.ANTHROPIC_API_KEY]
+# hosts = ["api.anthropic.com"]
+
+# For secrets that must be plainly visible inside the VM (non-HTTPS use):
+# secret_env = ["SOME_PLAIN_TOKEN"]
+# net = true                      # outbound networking (default true)
+# ssh_agent = true                # forward your SSH agent for git push/pull (default true)
 
 # The golden image: assembled by `stagehand build`, cloned into every demo VM.
 [build]
 image = "debian:bookworm-slim"
 
-# What `stagehand new` lands in — leave unset for a plain shell (then run
-# opencode by hand, or use: stagehand new -- opencode).
+# What `stagehand new` lands in — unset means a plain shell.
+# Set to "opencode" (or any harness in tools) to drop straight into it.
 # entrypoint = "opencode"
 
 # Demo toolchains via mise; every binary lands on PATH through mirrored shims.
@@ -56,36 +90,3 @@ apt-get install -y -qq --no-install-recommends build-essential curl pkg-config c
 cargo build --release --manifest-path /src/Cargo.toml -p atomic-cli
 cp /build/target/release/atomic /build/artifacts/atomic
 """
-
-[defaults]
-# what an unnamed `stagehand new` / `open` / `stop` means
-demo = "checkout"
-guest_port = 8080                 # port the webapp listens on inside the VM
-
-# Credentials bound HOST-SIDE: the VM only ever sees a SMOL_PLACEHOLDER_*
-# value; smolvm substitutes the real value from your shell env on HTTPS
-# requests to the hosts listed below. The secret never enters the VM.
-#
-# List EVERY host the credential is actually sent to — requests to any
-# host not listed pass through with the placeholder unchanged (and would
-# fail auth). The host must match what the client really connects to,
-# e.g. OpenRouter's API host is "openrouter.ai".
-#
-# Set the var in your shell when a machine is STARTED.
-[defaults.credentials.OPENROUTER_API_KEY]
-hosts = ["openrouter.ai"]
-
-# Add more bindings as needed, e.g.:
-# [defaults.credentials.ANTHROPIC_API_KEY]
-# hosts = ["api.anthropic.com"]
-
-# For secrets that must be plainly visible inside the VM (non-HTTPS use):
-# secret_env = ["SOME_PLAIN_TOKEN"]
-# net = true                      # outbound networking (default true)
-# ssh_agent = true                # forward your SSH agent for git push/pull (default true)
-
-[demos.checkout]
-port = 8410                       # ALWAYS http://localhost:8410
-
-[demos.search]
-port = 8420

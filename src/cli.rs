@@ -6,7 +6,7 @@ use std::path::PathBuf;
     name = "stagehand",
     version,
     about = "Run repeatable conference demos in disposable smolvm micro-VMs",
-    after_help = "Typical flow:\n  stagehand init              write a starter demo.toml\n  stagehand build             build the golden image (once)\n  stagehand new checkout      fresh VM, fixed port, ready to demo\n  stagehand stop checkout     preserve the session, free the machine"
+    after_help = "Typical flow:\n  stagehand init              write a starter demo.toml\n  stagehand build             build the golden image (once)\n  stagehand new               fresh VM, fixed port, drop straight in\n                              (exiting stops the machine — session preserved)\n  stagehand resume            resume a preserved session, drop back in"
 )]
 pub struct Cli {
     /// Path to demo.toml (default: search upwards from the current directory)
@@ -15,23 +15,6 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub cmd: Cmd,
-}
-
-impl Cmd {
-    /// The optional demo name carried by per-demo commands.
-    pub fn demo_name(&self) -> Option<String> {
-        match self {
-            Cmd::New { demo, .. }
-            | Cmd::Open { demo, .. }
-            | Cmd::Exec { demo, .. }
-            | Cmd::Url { demo }
-            | Cmd::Start { demo }
-            | Cmd::Stop { demo }
-            | Cmd::Reset { demo }
-            | Cmd::Rm { demo, .. } => demo.clone(),
-            _ => None,
-        }
-    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -46,12 +29,8 @@ pub enum Cmd {
         force: bool,
     },
 
-    /// Start a fresh VM from the golden image and land in its entrypoint
+    /// Start a fresh VM from the golden image, land in its entrypoint; exiting stops it
     New {
-        /// Demo name from demo.toml (optional — uses the default, last
-        /// used, or the only configured demo)
-        demo: Option<String>,
-
         /// Run this command instead of the image entrypoint (after `--`)
         #[arg(last = true)]
         cmd: Vec<String>,
@@ -61,21 +40,8 @@ pub enum Cmd {
         no_attach: bool,
     },
 
-    /// Attach to the most recent machine of a demo
-    Open {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
-
-        /// Run this command instead of the image entrypoint (after `--`)
-        #[arg(last = true)]
-        cmd: Vec<String>,
-    },
-
-    /// Run a command in the most recent machine of a demo
+    /// Run a command in the most recent machine
     Exec {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
-
         /// Run the command in the background (e.g. a demo webserver)
         #[arg(long)]
         detach: bool,
@@ -85,40 +51,32 @@ pub enum Cmd {
         cmd: Vec<String>,
     },
 
-    /// Print the URL of the most recent machine of a demo
-    Url {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
+    /// Print the URL of the demo
+    Url,
+
+    /// Resume a preserved session, land inside it, and stop it on exit
+    Resume {
+        /// Session number to resume (see `stagehand list`); default: newest
+        session: Option<u32>,
+
+        /// Run this command instead of the image entrypoint (after `--`)
+        #[arg(last = true)]
+        cmd: Vec<String>,
     },
 
-    /// Start the most recent machine of a demo (resume a preserved session)
-    Start {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
-    },
+    /// Halt the running session (session is preserved on disk)
+    Stop,
 
-    /// Stop the most recent machine of a demo (session is preserved on disk)
-    Stop {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
-    },
-
-    /// List demos, their machines, states and URLs
+    /// List sessions, their demo, state, port and machine
     #[command(alias = "ls")]
     List,
 
-    /// Delete the most recent machine of a demo and start a fresh one
-    Reset {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
-    },
+    /// Delete the most recent session and start a fresh one
+    Reset,
 
-    /// Delete machines of a demo
+    /// Delete machines of this demo
     #[command(alias = "delete")]
     Rm {
-        /// Demo name from demo.toml (optional)
-        demo: Option<String>,
-
         /// Delete every machine of this demo, not just the most recent
         #[arg(long)]
         all: bool,
@@ -129,7 +87,8 @@ pub enum Cmd {
     },
 
     /// Delete every stagehand-managed machine (after the conference)
-    Prune {
+    #[command(visible_alias = "cleanup")]
+    Strike {
         /// Also delete the template machine (the golden image is kept)
         #[arg(long)]
         template: bool,

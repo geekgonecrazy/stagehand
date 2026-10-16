@@ -113,19 +113,21 @@ impl Smol {
     }
 
     /// All managed machines of one demo, oldest first.
-    pub fn managed_for_demo(&self, demo: &str) -> Result<Vec<Machine>> {
+    /// All managed machines of this project (demo machines: not template,
+    /// not builder), oldest first.
+    pub fn managed_for_project(&self, slug: &str) -> Result<Vec<Machine>> {
         let mut v: Vec<Machine> = self
             .managed()?
             .into_iter()
-            .filter(|m| m.demo() == Some(demo))
+            .filter(|m| m.demo() == Some(slug))
             .collect();
         v.sort_by_key(|m| (m.idx(), m.created_at));
         Ok(v)
     }
 
-    /// The machine a demo command should operate on (highest index).
-    pub fn newest_for_demo(&self, demo: &str) -> Result<Option<Machine>> {
-        Ok(self.managed_for_demo(demo)?.pop())
+    /// The machine a project command should operate on (highest index).
+    pub fn newest_for_project(&self, slug: &str) -> Result<Option<Machine>> {
+        Ok(self.managed_for_project(slug)?.pop())
     }
 }
 

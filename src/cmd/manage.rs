@@ -25,95 +25,93 @@ pub fn init(config_flag: &Option<std::path::PathBuf>) -> Result<()> {
 
 pub fn list(loaded: &Loaded, smol: &Smol) -> Result<()> {
     let managed = smol.managed()?;
+    let eff = loaded.effective().ok();
+    let demo_machines: Vec<_> = managed
+        .iter()
+        .filter(|m| !m.is_template() && !m.is_builder())
+        .collect();
 
     // width computation
+    let mut session_w = "session".len();
     let mut demo_w = "demo".len();
+    let mut state_w = "state".len();
+    let mut port_w = "port".len();
     let mut mach_w = "machine".len();
-    for name in loaded.config.demos.keys() {
-        demo_w = demo_w.max(name.len());
-    }
-    for m in &managed {
+    for m in &demo_machines {
+        session_w = session_w.max(m.idx().map(|i| i.to_string().len()).unwrap_or(1));
+        demo_w = demo_w.max(m.demo().unwrap_or("-").len());
+        state_w = state_w.max(m.state.len());
+        port_w = port_w.max(eff.as_ref().map(|e| e.host_port.to_string().len()).unwrap_or(4));
         mach_w = mach_w.max(m.name.len());
     }
 
     println!(
-        "{:<demo_w$}  {:<mach_w$}  {:<9}  url",
+        "{:<session_w$}  {:<demo_w$}  {:<state_w$}  {:<port_w$}  {}",
+        util::bold("session"),
         util::bold("demo"),
-        util::bold("machine"),
         util::bold("state"),
+        util::bold("port"),
+        util::bold("machine"),
     );
 
-    let mut referenced = std::collections::BTreeSet::new();
-    for name in loaded.config.demos.keys() {
-        let machines: Vec<_> = managed.iter().filter(|m| m.demo() == Some(name.as_str())).collect();
-        let newest = machines.iter().copied().max_by_key(|m| (m.idx(), m.created_at));
-        for m in &machines {
-            referenced.insert(m.name.clone());
-        }
-        let eff = loaded.config.effective(name).ok();
-        match newest {
-            Some(m) => {
-                println!(
-                    "{:<demo_w$}  {:<mach_w$}  {:<9}  http://localhost:{}",
-                    name,
-                    m.name,
-                    state_cell(&m.state),
-                    eff.as_ref().map(|e| e.host_port).unwrap_or(0),
-                );
-                if machines.len() > 1 {
-                    println!(
-                        "{:<demo_w$}  {:<mach_w$}  {:<9}  {}",
-                        "",
-                        util::dim(&format!("+ {} older (preserved)", machines.len() - 1)),
-                        util::dim(""),
-                        util::dim("stagehand rm --all to clean up"),
-                    );
-                }
-            }
-            None => {
-                let url = eff
-                    .map(|e| format!("http://localhost:{}", e.host_port))
-                    .unwrap_or_else(|| "-".into());
-                println!("{:<demo_w$}  {:<mach_w$}  {:<9}  {}", name, "-", util::dim("-"), url);
-            }
+    // oldest first: session history reads top-down
+    for m in &demo_machines {
+        let session = m.idx().map(|i| i.to_string()).unwrap_or_else(|| "-".into());
+        println!(
+            "{:<session_w$}  {:<demo_w$}  {:<state_w$}  {:<port_w$}  {}",
+            session,
+            m.demo().unwrap_or("-"),
+            state_cell(&m.state),
+            eff.as_ref().map(|e| e.host_port.to_string()).unwrap_or_else(|| "-".into()),
+            m.name,
+        );
+    }
+    if demo_machines.is_empty() {
+        println!(
+            "{:<session_w$}  {:<demo_w$}  {:<state_w$}  {:<port_w$}  {}",
+            util::dim("-"),
+            util::dim("-"),
+            util::dim("-"),
+            util::dim("-"),
+            util::dim("(no sessions yet — `stagehand new`)"),
+        );
+    }
+
+    // infra machines (template/builder) shown separately
+    let infra: Vec<_> = managed.iter().filter(|m| m.is_template() || m.is_builder()).collect();
+    if !infra.is_empty() {
+        println!("\n{}", util::dim("— build infrastructure —"));
+        for m in &infra {
+            println!("{}  {}", util::dim(&m.name), state_cell(&m.state));
         }
     }
 
-    // machines without a matching demo (or template machine)
-    let orphans: Vec<_> = managed.iter().filter(|m| !referenced.contains(&m.name)).collect();
+    // unknown managed machines (labels point at this tool but nothing else)
+    let known: std::collections::BTreeSet<_> = demo_machines
+        .iter()
+        .map(|m| m.name.clone())
+        .chain(infra.iter().map(|m| m.name.clone()))
+        .collect();
+    let orphans: Vec<_> = managed.iter().filter(|m| !known.contains(&m.name)).collect();
     if !orphans.is_empty() {
-        println!("{}", util::dim("— managed but not configured —"));
+        println!("\n{}", util::dim("— managed but not recognized —"));
         for m in orphans {
-            let kind = if m.is_template() {
-                "template"
-            } else if m.is_builder() {
-                "builder"
-            } else {
-                "orphan"
-            };
-            println!(
-                "{:<demo_w$}  {:<mach_w$}  {:<9}  {}",
-                util::dim(kind),
-                m.name,
-                state_cell(&m.state),
-                util::dim("stagehand rm/prune to clean up"),
-            );
+            println!("{}  {}", m.name, state_cell(&m.state));
         }
     }
 
     let running = managed.iter().filter(|m| m.running()).count();
-    let total = managed.len();
     println!(
         "\n{} managed machine(s), {} running",
-        util::bold(&total.to_string()),
+        util::bold(&managed.len().to_string()),
         util::bold(&running.to_string())
     );
     Ok(())
 }
 
-pub fn reset(loaded: &Loaded, smol: &Smol, demo_name: &str) -> Result<()> {
-    let eff = loaded.config.effective(demo_name)?;
-    if let Some(m) = smol.newest_for_demo(demo_name)? {
+pub fn reset(loaded: &Loaded, smol: &Smol) -> Result<()> {
+    let eff = loaded.effective()?;
+    if let Some(m) = smol.newest_for_project(&loaded.slug)? {
         delete_machine(smol, &m)?;
     }
     let (name, _) = demo::spawn_fresh(loaded, smol, &eff)?;
@@ -137,11 +135,11 @@ fn delete_machine(smol: &Smol, m: &crate::smol::Machine) -> Result<()> {
     Ok(())
 }
 
-pub fn rm(loaded: &Loaded, smol: &Smol, demo_name: &str, all: bool, yes: bool) -> Result<()> {
-    loaded.config.effective(demo_name)?; // validate demo name
-    let machines = smol.managed_for_demo(demo_name)?;
+pub fn rm(loaded: &Loaded, smol: &Smol, all: bool, yes: bool) -> Result<()> {
+    let eff = loaded.effective()?;
+    let machines = smol.managed_for_project(&eff.name)?;
     if machines.is_empty() {
-        util::warn(&format!("no machines for demo `{demo_name}`"));
+        util::warn("no machines yet — `stagehand new`");
         return Ok(());
     }
     let targets: Vec<_> = if all {
@@ -162,7 +160,7 @@ pub fn rm(loaded: &Loaded, smol: &Smol, demo_name: &str, all: bool, yes: bool) -
     Ok(())
 }
 
-pub fn prune(loaded: &Loaded, smol: &Smol, include_template: bool, yes: bool) -> Result<()> {
+pub fn strike(loaded: &Loaded, smol: &Smol, include_template: bool, yes: bool) -> Result<()> {
     let managed = smol.managed()?;
     let targets: Vec<_> = managed
         .iter()
@@ -170,7 +168,7 @@ pub fn prune(loaded: &Loaded, smol: &Smol, include_template: bool, yes: bool) ->
         .cloned()
         .collect();
     if targets.is_empty() {
-        util::warn("nothing to prune — no managed machines");
+        util::warn("nothing to clean — no managed machines");
         return Ok(());
     }
     let names: Vec<&str> = targets.iter().map(|m| m.name.as_str()).collect();
@@ -186,6 +184,6 @@ pub fn prune(loaded: &Loaded, smol: &Smol, include_template: bool, yes: bool) ->
             loaded.golden_path.display()
         );
     }
-    util::ok("prune complete");
+    util::ok("strike complete — set struck");
     Ok(())
 }
