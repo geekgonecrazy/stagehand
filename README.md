@@ -1,5 +1,18 @@
 # stagehand
 
+<div align="center">
+
+<img src="assets/logo.png" alt="stagehand — a little crab holding a clapperboard" width="560"/>
+
+**Repeatable conference demos in disposable micro-VMs.**
+
+[![smolvm](https://img.shields.io/badge/powered%20by-smolvm-blue)](https://smolmachines.com)
+![platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux-lightgrey)
+
+</div>
+
+> 🎬 *The stagehand builds the set, lays the props, and strikes it all after the show — so the same demo runs flawlessly, every single time.*
+
 Run repeatable conference demos in disposable [smolvm](https://smolmachines.com) micro-VMs.
 
 One command starts a **fresh Linux VM with your tools already installed** (an AI
