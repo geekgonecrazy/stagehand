@@ -62,11 +62,15 @@ so the fixed port is always free.
 
 ## Install
 
+Grab a prebuilt binary from [Releases](https://github.com/geekgonecrazy/stagehand/releases)
+(macOS arm/Intel, Linux x64/arm64 — static on Linux), or build from source:
+
 ```sh
 cargo install --path .          # installs `stagehand` onto your PATH
 ```
 
-Requires `smolvm` on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
+Requires [smolvm](https://smolmachines.com) on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
+Toolchains (mise, rust, go, …) live inside the VMs — the host never needs them.
 
 ## Setup
 
