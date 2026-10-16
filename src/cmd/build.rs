@@ -60,17 +60,17 @@ done
 echo "==> golden image setup complete"
 "#;
 
-fn build_script(tpl: &crate::config::TemplateCfg) -> String {
-    let setup = match &tpl.setup {
+fn build_script(build: &crate::config::BuildCfg) -> String {
+    let setup = match &build.setup {
         Some(s) => format!("\necho \"==> custom setup\"\n{s}\n"),
         None => String::new(),
     };
-    let tool_names: Vec<&str> = tpl.tools.iter().map(|s| tool_name(s)).collect();
+    let tool_names: Vec<&str> = build.tools.iter().map(|s| tool_name(s)).collect();
     SCRIPT_TEMPLATE
-        .replace("__PKGS__", &tpl.packages.join(" "))
-        .replace("__TOOLS__", &tpl.tools.join(" "))
+        .replace("__PKGS__", &build.packages.join(" "))
+        .replace("__TOOLS__", &build.tools.join(" "))
         .replace("__TOOLNAMES__", &tool_names.join(" "))
-        .replace("__WORKSPACE__", &tpl.workspace)
+        .replace("__WORKSPACE__", &build.workspace)
         .replace("__SETUP__", &setup)
 }
 
@@ -100,7 +100,7 @@ for tool in {joined}; do mise use -g "$tool"; done
 
 pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
     let name = &loaded.template_name;
-    let tpl = &loaded.config.template;
+    let build = &loaded.config.build;
 
     std::fs::create_dir_all(&loaded.dot_dir)
         .with_context(|| format!("creating {}", loaded.dot_dir.display()))?;
@@ -119,27 +119,19 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
     let exists = smol.status(name)?.is_some();
     if !exists {
         println!("{}", util::bold(&format!("==> creating template machine {name}")));
-        let mut args = vec![
+        let args = vec![
             "machine".to_string(),
             "create".to_string(),
             "--name".to_string(),
             name.clone(),
             "--image".to_string(),
-            tpl.image.clone(),
+            build.image.clone(),
             "--net".to_string(),
             "--label".to_string(),
             format!("{}=1", crate::config::LABEL_MANAGED),
             "--label".to_string(),
             format!("{}={ROLE_TEMPLATE}", crate::config::LABEL_ROLE),
         ];
-        if let Some(cpus) = tpl.cpus {
-            args.push("--cpus".into());
-            args.push(cpus.to_string());
-        }
-        if let Some(mem) = tpl.mem_mib {
-            args.push("--mem".into());
-            args.push(mem.to_string());
-        }
         smol.run_inherit(&refs(&args))?;
     } else {
         println!("==> reusing existing template machine {name}");
@@ -147,8 +139,8 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
 
     // Cross-compile Linux artifacts first (if configured) — the template
     // setup script may rely on them being installed.
-    if let Some(build) = &loaded.config.build {
-        build_artifacts(loaded, smol, build)?;
+    if let Some(builder) = &loaded.config.builder {
+        build_artifacts(loaded, smol, builder)?;
     }
 
     let m = smol.status(name)?.context("template machine vanished")?;
@@ -179,7 +171,7 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
             "sh",
             "-s",
         ],
-        &build_script(tpl),
+        &build_script(build),
     )?;
 
     println!("==> stopping template");
@@ -221,7 +213,7 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
 
 /// Cross-compile on Linux inside the persistent builder machine and copy the
 /// artifacts back to the host.
-fn build_artifacts(loaded: &Loaded, smol: &Smol, build: &crate::config::BuildCfg) -> Result<()> {
+fn build_artifacts(loaded: &Loaded, smol: &Smol, builder: &crate::config::BuilderCfg) -> Result<()> {
     let name = &loaded.builder_name;
     let exists = smol.status(name)?.is_some();
     if !exists {
@@ -229,17 +221,17 @@ fn build_artifacts(loaded: &Loaded, smol: &Smol, build: &crate::config::BuildCfg
             "{}",
             util::bold(&format!("==> creating builder machine {name}"))
         );
-        let source = build
+        let source = builder
             .source
             .canonicalize()
-            .unwrap_or_else(|_| build.source.clone());
+            .unwrap_or_else(|_| builder.source.clone());
         let args = vec![
             "machine".to_string(),
             "create".to_string(),
             "--name".to_string(),
             name.clone(),
             "--image".to_string(),
-            build.image.clone(),
+            builder.image.clone(),
             "--net".to_string(),
             "-v".to_string(),
             format!("{}:/src", source.to_string_lossy()),
@@ -266,8 +258,8 @@ fn build_artifacts(loaded: &Loaded, smol: &Smol, build: &crate::config::BuildCfg
     println!("{}", util::bold("==> building Linux artifacts in builder VM"));
     let script = format!(
         "set -eu\nmkdir -p /build/artifacts\ncd /build\n\n{}{}\n",
-        mise_prelude(&build.tools),
-        build.script
+        mise_prelude(&builder.tools),
+        builder.script
     );
     // 60m: a cold Rust release build inside the microVM is slow; incremental
     // rebuilds reuse the persistent target dir and finish in seconds.
@@ -291,7 +283,7 @@ fn build_artifacts(loaded: &Loaded, smol: &Smol, build: &crate::config::BuildCfg
     )?;
 
     std::fs::create_dir_all(&loaded.artifacts_dir)?;
-    for artifact in &build.artifacts {
+    for artifact in &builder.artifacts {
         let dest = loaded.artifacts_dir.join(artifact);
         println!("==> exporting {artifact}");
         smol.run_inherit(&[
@@ -307,12 +299,12 @@ fn build_artifacts(loaded: &Loaded, smol: &Smol, build: &crate::config::BuildCfg
 /// Copy exported artifacts into the template at /usr/local/bin and verify
 /// each one runs.
 fn install_artifacts(loaded: &Loaded, smol: &Smol) -> Result<()> {
-    let build = match &loaded.config.build {
+    let builder = match &loaded.config.builder {
         Some(b) => b,
         None => return Ok(()),
     };
     let name = &loaded.template_name;
-    for artifact in &build.artifacts {
+    for artifact in &builder.artifacts {
         let host = loaded.artifacts_dir.join(artifact);
         if !host.is_file() {
             bail!("build artifact missing on host: {}", host.display());
@@ -424,10 +416,8 @@ mod tests {
 
     #[test]
     fn script_contains_packages_and_setup() {
-        let tpl = crate::config::TemplateCfg {
+        let build = crate::config::BuildCfg {
             image: "debian:bookworm-slim".into(),
-            cpus: None,
-            mem_mib: None,
             packages: vec!["curl".into(), "git".into()],
             tools: vec!["some-cli@1.0".into()],
             entrypoint: vec![],
@@ -435,7 +425,7 @@ mod tests {
             shell: "/bin/bash".into(),
             workspace: "/workspace".into(),
         };
-        let s = build_script(&tpl);
+        let s = build_script(&build);
         assert!(s.contains("curl git"));
         assert!(s.contains("echo hi"));
         assert!(s.contains("mkdir -p \"/workspace\""));
@@ -448,10 +438,8 @@ mod tests {
 
     #[test]
     fn script_without_tools_skips_mise() {
-        let tpl = crate::config::TemplateCfg {
+        let build = crate::config::BuildCfg {
             image: "debian:bookworm-slim".into(),
-            cpus: None,
-            mem_mib: None,
             packages: vec![],
             tools: vec![],
             entrypoint: vec![],
@@ -459,7 +447,7 @@ mod tests {
             shell: "/bin/bash".into(),
             workspace: "/workspace".into(),
         };
-        let s = build_script(&tpl);
+        let s = build_script(&build);
         assert!(s.contains("if [ -n \"\" ]; then"));
     }
 

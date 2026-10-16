@@ -1,38 +1,24 @@
 # democtl configuration — one section per conference demo.
 # Every demo gets a FIXED host port: the demo is always at the same URL.
 
-# Linux build machine: cross-compiles `atomic` from the local checkout and
-# installs the binary into the golden image at /usr/local/bin/atomic.
-# Toolchains (rust) are managed by mise; the builder machine persists, so
-# only the first build is slow.
+# The golden image: assembled by `democtl build`, cloned into every demo VM.
 [build]
 image = "debian:bookworm-slim"
-source = "/Users/aaron/code/work/atomic"
-tools = ["rust@stable"]
-artifacts = ["atomic"]
-script = """
-set -eu
-export DEBIAN_FRONTEND=noninteractive
-export CARGO_TARGET_DIR=/build/target
 
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends build-essential curl pkg-config ca-certificates unzip
-
-cargo build --release --manifest-path /src/Cargo.toml -p atomic-cli
-cp /build/target/release/atomic /build/artifacts/atomic
-"""
-
-[template]
 # What `democtl new` lands in — swap for any harness installed via tools
 # (e.g. "claude", "gemini"), or drop the line to land in a plain shell.
 entrypoint = "opencode"
+
 # Demo toolchains via mise; every binary lands on PATH through mirrored shims.
 # node is required by opencode 2.x (npm package postinstall).
 tools = ["node@lts", "opencode@latest", "go@latest", "rust@stable"]
+
+# Distro packages in the image; build-essential provides cc so cargo can link.
 packages = [
   "ca-certificates", "curl", "git", "jq", "less", "ripgrep", "unzip",
   "build-essential",
 ]
+
 # Wire opencode to atomic: the hooks install into ~/.config/opencode (global),
 # which persists in the golden image. `agent enable` needs a repo root, so
 # smoke-init one in /tmp first (that repo itself is throwaway).
@@ -49,6 +35,26 @@ atomic init
 atomic agent enable --agent opencode --force || \
   echo "WARNING: partial agent enable — hooks installed, skills/system-prompt missing"
 atomic agent status || true
+"""
+
+# Optional cross-compile stage: builds the Linux `atomic` binary from the
+# local checkout and installs it into the golden image at /usr/local/bin.
+# The builder machine persists, so only the first build is slow.
+[builder]
+image = "debian:bookworm-slim"
+source = "/Users/aaron/code/work/atomic"
+tools = ["rust@stable"]
+artifacts = ["atomic"]
+script = """
+set -eu
+export DEBIAN_FRONTEND=noninteractive
+export CARGO_TARGET_DIR=/build/target
+
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends build-essential curl pkg-config ca-certificates unzip
+
+cargo build --release --manifest-path /src/Cargo.toml -p atomic-cli
+cp /build/target/release/atomic /build/artifacts/atomic
 """
 
 [defaults]

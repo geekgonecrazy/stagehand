@@ -70,9 +70,32 @@ democtl build                   # ~5 min once: installs packages + tools in a
 `demo.toml` reference:
 
 ```toml
+[build]                        # the golden image recipe — assembled by `democtl build`
+image = "debian:bookworm-slim" # base image
+packages = ["git", "curl"]     # distro packages installed into the image
+tools = ["node@lts", "some-cli@latest"]  # mise tools installed into the image
+entrypoint = "some-cli"        # what `democtl new` lands in (default: shell)
+shell = "/bin/bash"            # shell used when no entrypoint is set
+workspace = "/workspace"       # working directory for new/open/exec
+setup = """                    # extra provisioning script, runs in the template
+your-setup-command --here
+"""
+
+[builder]                      # optional — cross-compile stage for Linux artifacts
+image = "debian:bookworm-slim" # builder base image
+source = "/path/to/your/repo"  # host dir mounted at /src inside the builder
+tools = ["rust@stable"]        # mise tools installed in the builder first
+artifacts = ["my-tool"]        # files under /build/artifacts/ to install into the image
+script = """                   # runs in the builder VM (persistent, incremental)
+cargo build --release --manifest-path /src/Cargo.toml -p my-cli
+cp /build/target/release/my-tool /build/artifacts/my-tool
+"""
+
 [defaults]
-demo = "checkout"               # what an unnamed `democtl new`/`open`/`stop` means
-guest_port = 8080               # where your webapp listens inside the VM
+demo = "checkout"              # what an unnamed `democtl new`/`open`/`stop` means
+guest_port = 8080              # where your webapp listens inside the VM
+net = true                     # outbound networking from the VM
+ssh_agent = true               # forward the host SSH agent (git push/pull from the VM)
 
 # Host-side credential bindings (recommended): the VM sees a placeholder,
 # the real value is substituted on HTTPS requests to the hosts you list —
@@ -84,35 +107,17 @@ hosts = ["openrouter.ai"]
 
 # Plain secrets: the value IS visible inside the VM (for non-HTTPS tools).
 # secret_env = ["SOME_PLAIN_TOKEN"]
-net = true                      # outbound networking from the VM
-ssh_agent = true                # forward the host SSH agent (git push/pull from the VM)
-
-[template]                      # optional — golden image recipe
-image = "debian:bookworm-slim"  # base image for the template
-packages = ["git", "curl"]      # extra packages installed into the golden image
-setup = """                     # extra setup shell script, runs in the template
-your-setup-command --here
-"""
-entrypoint = "opencode"         # what `democtl new` lands in (default: shell)
-shell = "/bin/bash"             # what `democtl open` drops you into
-workspace = "/workspace"        # working directory for open/exec
-tools = ["node@lts", "opencode@latest"]  # mise tools installed into the image
-
-[build]                         # optional — Linux build machine (cross-compile)
-image = "debian:bookworm-slim"  # builder base image
-source = "/path/to/your/repo"   # host dir mounted at /src inside the builder
-tools = ["rust@stable"]         # mise tools installed in the builder first
-artifacts = ["atomic"]          # files under /build/artifacts/ to install
-script = """                    # runs in the builder VM (persistent, incremental)
-cargo build --release --manifest-path /src/Cargo.toml -p atomic-cli
-cp /build/target/release/atomic /build/artifacts/atomic
-"""
 
 [demos.checkout]
-port = 8410                     # FIXED host port — the demo's permanent URL
-# guest_port = 8080             # override [defaults].guest_port for this demo
+port = 8410                    # FIXED host port — the demo's permanent URL
+# guest_port = 8080            # override [defaults].guest_port for this demo
 # credentials = { MY_KEY = { hosts = ["api.example.com"] } }  # replaces defaults for this demo
 ```
+
+Two-stage model, like a multi-stage Dockerfile: `[builder]` (optional)
+produces Linux artifacts, `[build]` assembles the golden image from a base
+image + packages + mise tools + `setup`, and copies `[builder]` artifacts
+into it at `/usr/local/bin/`. Demo VMs are clones of that image.
 
 Tooling is managed by [mise](https://mise.jdx.dev): `tools` specs are installed
 with `mise use -g` in the respective VM, and every template tool is symlinked
@@ -130,7 +135,7 @@ toolchains and `target/` survive across builds; only the first build is slow
 | Command | What it does |
 |---|---|
 | `democtl init` | Write a starter `demo.toml` |
-| `democtl build [--force]` | (Re)build the golden image from the `[template]` recipe |
+| `democtl build [--force]` | (Re)build the golden image from the `[build]` recipe + `[builder]` stage |
 | `democtl new <demo> [--no-attach] [-- cmd]` | Fresh VM from the golden image, started, lands in the entrypoint |
 | `democtl open <demo> [-- cmd]` | Attach to the newest machine — image entrypoint, or a command override (boots it first if stopped) |
 | `democtl exec <demo> [--detach] [-- cmd]` | Run a one-off command (`--detach` for background servers) |
@@ -150,7 +155,7 @@ shows what that is.
 The night before:
 
 ```sh
-democtl build                   # refresh the golden image if [template] changed
+democtl build                   # refresh the golden image if [build] changed
 democtl new checkout && democtl stop checkout   # dress rehearsal, machine stays archived
 ```
 

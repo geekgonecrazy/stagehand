@@ -214,7 +214,7 @@ pub fn new(
     cmd: &[String],
 ) -> Result<()> {
     let eff = loaded.config.effective(demo)?;
-    let tpl = &loaded.config.template;
+    let build = &loaded.config.build;
     let (name, secrets) = spawn_fresh(loaded, smol, &eff)?;
     print_ready(&eff, &name);
     if !no_attach {
@@ -222,11 +222,11 @@ pub fn new(
         let program: Vec<String> = if !cmd.is_empty() {
             cmd.to_vec()
         } else {
-            tpl.entrypoint_programs()
+            build.entrypoint_programs()
         };
         smol.run_inherit(&refs(&exec_args(
             &name,
-            &tpl.workspace,
+            &build.workspace,
             true,
             false,
             &secrets,
@@ -258,16 +258,16 @@ pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, cmd: &[String]) -> Result<
     ensure_running(smol, &m, &eff)?;
 
     let (secrets, _) = secret_refs(&eff);
-    let tpl = &loaded.config.template;
+    let build = &loaded.config.build;
     // Command override > image entrypoint (shell default)
     let program: Vec<String> = if !cmd.is_empty() {
         cmd.to_vec()
     } else {
-        tpl.entrypoint_programs()
+        build.entrypoint_programs()
     };
     smol.run_inherit(&refs(&exec_args(
         &m.name,
-        &tpl.workspace,
+        &build.workspace,
         true,
         false,
         &secrets,
@@ -291,10 +291,10 @@ pub fn exec(loaded: &Loaded, smol: &Smol, demo: &str, detach: bool, cmd: &[Strin
     ensure_running(smol, &m, &eff)?;
     let (secrets, _) = secret_refs(&eff);
     let interactive = !detach && std::io::IsTerminal::is_terminal(&std::io::stdin());
-    let tpl = &loaded.config.template;
+    let build = &loaded.config.build;
     smol.run_inherit(&refs(&exec_args(
         &m.name,
-        &tpl.workspace,
+        &build.workspace,
         interactive,
         detach,
         &secrets,
@@ -385,10 +385,8 @@ mod tests {
     fn test_loaded() -> Loaded {
         Loaded {
             config: crate::config::Config {
-                template: crate::config::TemplateCfg {
+                build: crate::config::BuildCfg {
                     image: "debian:bookworm-slim".into(),
-                    cpus: None,
-                    mem_mib: None,
                     packages: vec![],
                     tools: vec![],
                     entrypoint: vec![],
@@ -396,7 +394,7 @@ mod tests {
                     shell: "/bin/bash".into(),
                     workspace: "/workspace".into(),
                 },
-                build: None,
+                builder: None,
                 defaults: crate::config::DefaultsCfg {
                     demo: None,
                     net: true,

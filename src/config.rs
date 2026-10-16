@@ -15,11 +15,13 @@ pub const ROLE_TEMPLATE: &str = "template";
 /// Label marking the Linux build machine.
 pub const ROLE_BUILDER: &str = "builder";
 
+/// The golden image recipe (`[build]`): assembled by `democtl build`,
+/// cloned into every demo VM.
 #[derive(Debug, Clone)]
-pub struct TemplateCfg {
+pub struct BuildCfg {
+    /// Base image for the template machine.
     pub image: String,
-    pub cpus: Option<u32>,
-    pub mem_mib: Option<u32>,
+    /// Distro packages installed into the golden image.
     pub packages: Vec<String>,
     /// mise tool specs installed into the golden image (e.g. `node@lts`).
     /// Every binary they provide is put on PATH via mirrored shims.
@@ -29,11 +31,13 @@ pub struct TemplateCfg {
     pub entrypoint: Vec<String>,
     /// Extra shell script run inside the template after the default setup.
     pub setup: Option<String>,
+    /// Login shell used when the entrypoint is unset.
     pub shell: String,
+    /// Working directory for new/open/exec inside the VM.
     pub workspace: String,
 }
 
-impl TemplateCfg {
+impl BuildCfg {
     /// The programs `new`/`open` attach to when not overridden per-invocation.
     pub fn entrypoint_programs(&self) -> Vec<String> {
         if self.entrypoint.is_empty() {
@@ -90,10 +94,11 @@ pub struct EffectiveDemo {
     pub credentials: BTreeMap<String, Vec<String>>,
 }
 
-/// Optional Linux build machine: cross-compiles artifacts (e.g. a Linux
-/// binary of a host project) that get installed into the golden image.
+/// Optional Linux artifact stage (`[builder]`): a separate machine that
+/// cross-compiles artifacts (e.g. from a host checkout mounted at `/src`)
+/// which `democtl build` installs into the golden image.
 #[derive(Debug, Clone)]
-pub struct BuildCfg {
+pub struct BuilderCfg {
     pub image: String,
     /// Host directory mounted read-write at `/src` inside the builder.
     pub source: PathBuf,
@@ -104,14 +109,16 @@ pub struct BuildCfg {
     /// exportable files under `/build/artifacts/`.
     pub script: String,
     /// File names under `/build/artifacts/` to copy back to the host and
-    /// install into the template at `/usr/local/bin/`.
+    /// install into the golden image at `/usr/local/bin/`.
     pub artifacts: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub template: TemplateCfg,
-    pub build: Option<BuildCfg>,
+    /// The golden image recipe.
+    pub build: BuildCfg,
+    /// Optional Linux artifact stage.
+    pub builder: Option<BuilderCfg>,
     pub defaults: DefaultsCfg,
     pub demos: BTreeMap<String, DemoCfg>,
 }
@@ -175,17 +182,30 @@ pub struct Loaded {
 
 #[derive(Deserialize, Debug, Default)]
 struct RawConfig {
-    template: Option<RawTemplate>,
     build: Option<RawBuild>,
+    builder: Option<RawBuilder>,
     defaults: Option<RawDefaults>,
     #[serde(default)]
     demos: BTreeMap<String, RawDemo>,
 }
 
-/// Optional Linux build machine config.
+/// The golden image recipe.
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 struct RawBuild {
+    image: Option<String>,
+    packages: Option<Vec<String>>,
+    tools: Option<Vec<String>>,
+    entrypoint: Option<OneOrMany>,
+    setup: Option<String>,
+    shell: Option<String>,
+    workspace: Option<String>,
+}
+
+/// The optional cross-compile stage.
+#[derive(Deserialize, Debug, Default)]
+#[serde(default)]
+struct RawBuilder {
     image: Option<String>,
     source: Option<PathBuf>,
     tools: Option<Vec<String>>,
@@ -193,22 +213,24 @@ struct RawBuild {
     artifacts: Option<Vec<String>>,
 }
 
-impl RawBuild {
-    fn into_cfg(self) -> Result<BuildCfg> {
+impl RawBuilder {
+    fn into_cfg(self) -> Result<BuilderCfg> {
         let source = self.source.ok_or_else(|| {
-            anyhow::anyhow!("[build] needs `source` — the host directory to mount at /src")
+            anyhow::anyhow!("[builder] needs `source` — the host directory to mount at /src")
         })?;
         let script = self.script.ok_or_else(|| {
-            anyhow::anyhow!("[build] needs `script` — the build commands run inside the builder VM")
+            anyhow::anyhow!(
+                "[builder] needs `script` — the build commands run inside the builder VM"
+            )
         })?;
         let artifacts = self.artifacts.unwrap_or_default();
         if artifacts.is_empty() {
-            bail!("[build] needs at least one `artifacts` entry — file names under /build/artifacts/");
+            bail!("[builder] needs at least one `artifacts` entry — file names under /build/artifacts/");
         }
         if script.trim().is_empty() {
-            bail!("[build] script is empty");
+            bail!("[builder] script is empty");
         }
-        Ok(BuildCfg {
+        Ok(BuilderCfg {
             image: self.image.unwrap_or_else(|| "debian:bookworm-slim".into()),
             source,
             tools: self.tools.unwrap_or_default(),
@@ -234,20 +256,6 @@ impl OneOrMany {
             OneOrMany::Many(v) => v,
         }
     }
-}
-
-#[derive(Deserialize, Debug, Default)]
-#[serde(default)]
-struct RawTemplate {
-    image: Option<String>,
-    cpus: Option<u32>,
-    mem: Option<u32>,
-    packages: Option<Vec<String>>,
-    tools: Option<Vec<String>>,
-    entrypoint: Option<OneOrMany>,
-    setup: Option<String>,
-    shell: Option<String>,
-    workspace: Option<String>,
 }
 
 impl Loaded {
@@ -370,7 +378,7 @@ pub fn default_packages() -> Vec<String> {
 impl RawConfig {
     fn into_config(self) -> Result<Config> {
         let raw = self;
-        let t = raw.template.unwrap_or_default();
+        let b = raw.build.unwrap_or_default();
         let d = raw.defaults.unwrap_or_default();
         let parse_creds = |m: Option<BTreeMap<String, RawCredential>>| -> Vec<(String, Result<CredentialCfg>)> {
             m.unwrap_or_default()
@@ -390,24 +398,22 @@ impl RawConfig {
                 Err(e) => eprintln!("warning: [defaults.credentials.{k}]: {e}"),
             }
         }
-        let build = match raw.build.map(RawBuild::into_cfg) {
+        let builder = match raw.builder.map(RawBuilder::into_cfg) {
             Some(Ok(cfg)) => Some(cfg),
             Some(Err(e)) => bail!("{e}"),
             None => None,
         };
         let mut config = Config {
-            template: TemplateCfg {
-                image: t.image.unwrap_or_else(|| "debian:bookworm-slim".into()),
-                cpus: t.cpus,
-                mem_mib: t.mem,
-                packages: t.packages.unwrap_or_else(default_packages),
-                tools: t.tools.unwrap_or_default(),
-                entrypoint: t.entrypoint.map(OneOrMany::into_vec).unwrap_or_default(),
-                setup: t.setup,
-                shell: t.shell.unwrap_or_else(|| "/bin/bash".into()),
-                workspace: t.workspace.unwrap_or_else(|| "/workspace".into()),
+            build: BuildCfg {
+                image: b.image.unwrap_or_else(|| "debian:bookworm-slim".into()),
+                packages: b.packages.unwrap_or_else(default_packages),
+                tools: b.tools.unwrap_or_default(),
+                entrypoint: b.entrypoint.map(OneOrMany::into_vec).unwrap_or_default(),
+                setup: b.setup,
+                shell: b.shell.unwrap_or_else(|| "/bin/bash".into()),
+                workspace: b.workspace.unwrap_or_else(|| "/workspace".into()),
             },
-            build,
+            builder,
             defaults: DefaultsCfg {
                 demo: d.demo,
                 net: d.net.unwrap_or(true),
@@ -479,9 +485,9 @@ pub fn load(explicit: Option<&Path>) -> Result<Loaded> {
     )
     .with_context(|| format!("parsing {}", path.display()))?;
     let config: Config = raw.into_config()?;
-    if let Some(b) = &config.build {
+    if let Some(b) = &config.builder {
         if !b.source.is_dir() {
-            bail!("[build] source directory not found: {}", b.source.display());
+            bail!("[builder] source directory not found: {}", b.source.display());
         }
     }
 
@@ -523,6 +529,20 @@ pub fn slug(s: &Path) -> String {
 pub const STARTER: &str = r#"# democtl configuration — one section per conference demo.
 # Full reference in the project README.
 
+[build]
+image = "debian:bookworm-slim"    # base image for the golden image
+
+# What `democtl new` lands in. Drop the line for a plain shell.
+# entrypoint = "some-cli"
+
+# mise tools installed into the image; every binary they provide lands on PATH.
+# tools = ["node@lts", "some-cli@latest"]
+
+# Distro packages installed into the image.
+# packages = ["git", "curl"]
+
+# setup = """...'''..."""          # extra setup script, runs in the template
+
 [defaults]
 guest_port = 8080                 # port your webapp listens on inside the VM
 
@@ -540,12 +560,6 @@ guest_port = 8080                 # port your webapp listens on inside the VM
 # secret_env = ["SOME_PLAIN_TOKEN"]
 # net = true                      # outbound networking (default true)
 # ssh_agent = true                # forward your SSH agent for git pushes (default true)
-
-[template]
-# tools = ["node@lts", "some-cli@latest"]  # mise tools installed into the image
-# entrypoint = "some-cli"                 # what `democtl new` lands in (default: shell)
-# packages = ["git", "curl"]              # extra distro packages
-# setup = """..."""                       # extra setup script, runs in the template
 
 [demos.checkout]
 port = 8410                       # the demo is ALWAYS at http://localhost:8410
@@ -624,23 +638,23 @@ mod tests {
         };
 
         // string form
-        let loaded = mk("[template]\nentrypoint = \"some-cli\"\n[demos.x]\nport=1\n");
+        let loaded = mk("[build]\nentrypoint = \"some-cli\"\n[demos.x]\nport=1\n");
         assert_eq!(
-            loaded.config.template.entrypoint_programs(),
+            loaded.config.build.entrypoint_programs(),
             vec!["some-cli".to_string()]
         );
 
         // array form (program + args)
-        let loaded = mk("[template]\nentrypoint = [\"some-cli\", \"--flag\"]\n[demos.x]\nport=1\n");
+        let loaded = mk("[build]\nentrypoint = [\"some-cli\", \"--flag\"]\n[demos.x]\nport=1\n");
         assert_eq!(
-            loaded.config.template.entrypoint_programs(),
+            loaded.config.build.entrypoint_programs(),
             vec!["some-cli".to_string(), "--flag".to_string()]
         );
 
         // absent → shell
         let loaded = mk("[demos.x]\nport=1\n");
         assert_eq!(
-            loaded.config.template.entrypoint_programs(),
+            loaded.config.build.entrypoint_programs(),
             vec!["/bin/bash".to_string()]
         );
 
