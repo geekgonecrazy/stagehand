@@ -17,8 +17,8 @@ pub fn init(config_flag: &Option<std::path::PathBuf>) -> Result<()> {
     println!(
         "\nnext:\n  1. edit [demos.*] — one section per demo, each with a fixed {}\n  2. {}  (installs your tools into a template VM, once)\n  3. {}",
         util::bold("port"),
-        util::bold("democtl build"),
-        util::bold("democtl new <demo>")
+        util::bold("stagehand build"),
+        util::bold("stagehand new <demo>")
     );
     Ok(())
 }
@@ -66,7 +66,7 @@ pub fn list(loaded: &Loaded, smol: &Smol) -> Result<()> {
                         "",
                         util::dim(&format!("+ {} older (preserved)", machines.len() - 1)),
                         util::dim(""),
-                        util::dim("democtl rm --all to clean up"),
+                        util::dim("stagehand rm --all to clean up"),
                     );
                 }
             }
@@ -96,7 +96,7 @@ pub fn list(loaded: &Loaded, smol: &Smol) -> Result<()> {
                 util::dim(kind),
                 m.name,
                 state_cell(&m.state),
-                util::dim("democtl rm/prune to clean up"),
+                util::dim("stagehand rm/prune to clean up"),
             );
         }
     }

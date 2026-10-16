@@ -107,7 +107,7 @@ impl Smol {
         Ok(self.machines()?.into_iter().find(|m| m.name == name))
     }
 
-    /// Every democtl-managed machine.
+    /// Every stagehand-managed machine.
     pub fn managed(&self) -> Result<Vec<Machine>> {
         Ok(self.machines()?.into_iter().filter(|m| m.is_managed()).collect())
     }
@@ -158,7 +158,7 @@ impl Machine {
     }
 
     /// Creation index from the `idx` label, falling back to the trailing
-    /// number in the machine name (`democtl-my-demo-3` → 3).
+    /// number in the machine name (`stagehand-my-demo-3` → 3).
     pub fn idx(&self) -> Option<i64> {
         if let Some(i) = self.labels.get(LABEL_IDX).and_then(|v| v.parse().ok()) {
             return Some(i);
@@ -220,7 +220,7 @@ mod tests {
     #[test]
     fn parses_ls_json() {
         let json = r#"[
-          {"name":"democtl-my-demo-1","state":"running","labels":{"democtl":"1","demo":"my-demo","idx":"1"},"created_at":1791492903},
+          {"name":"stagehand-my-demo-1","state":"running","labels":{"stagehand":"1","demo":"my-demo","idx":"1"},"created_at":1791492903},
           {"name":"unrelated","state":"stopped","labels":{},"created_at":1}
         ]"#;
         let ms: Vec<Machine> = serde_json::from_str(json).unwrap();
@@ -232,7 +232,7 @@ mod tests {
 
     #[test]
     fn idx_falls_back_to_name() {
-        let m = m("democtl-search-12", &[(LABEL_MANAGED, "1")]);
+        let m = m("stagehand-search-12", &[(LABEL_MANAGED, "1")]);
         assert_eq!(m.idx(), Some(12));
     }
 

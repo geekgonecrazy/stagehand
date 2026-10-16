@@ -1,5 +1,5 @@
 [package]
-name = "democtl"
+name = "stagehand"
 version = "0.1.0"
 edition = "2021"
 description = "Run repeatable conference demos in disposable smolvm micro-VMs"

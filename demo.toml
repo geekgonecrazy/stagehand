@@ -1,12 +1,12 @@
-# democtl configuration — one section per conference demo.
+# stagehand configuration — one section per conference demo.
 # Every demo gets a FIXED host port: the demo is always at the same URL.
 
-# The golden image: assembled by `democtl build`, cloned into every demo VM.
+# The golden image: assembled by `stagehand build`, cloned into every demo VM.
 [build]
 image = "debian:bookworm-slim"
 
-# What `democtl new` lands in — leave unset for a plain shell (then run
-# opencode by hand, or use: democtl new -- opencode).
+# What `stagehand new` lands in — leave unset for a plain shell (then run
+# opencode by hand, or use: stagehand new -- opencode).
 # entrypoint = "opencode"
 
 # Demo toolchains via mise; every binary lands on PATH through mirrored shims.
@@ -58,7 +58,7 @@ cp /build/target/release/atomic /build/artifacts/atomic
 """
 
 [defaults]
-# what an unnamed `democtl new` / `open` / `stop` means
+# what an unnamed `stagehand new` / `open` / `stop` means
 demo = "checkout"
 guest_port = 8080                 # port the webapp listens on inside the VM
 

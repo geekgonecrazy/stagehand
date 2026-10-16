@@ -5,7 +5,7 @@ use anyhow::{bail, Context, Result};
 use std::path::PathBuf;
 use std::process::Stdio;
 
-/// Shell script installed into the template machine by `democtl build`.
+/// Shell script installed into the template machine by `stagehand build`.
 /// `__PKGS__`, `__TOOLS__`, `__TOOLNAMES__`, `__WORKSPACE__` and `__SETUP__`
 /// are substituted by [`build_script`].
 const SCRIPT_TEMPLATE: &str = r#"set -eu
@@ -35,7 +35,7 @@ if [ -n "__TOOLS__" ]; then
   for tool in __TOOLS__; do mise use -g "$tool"; done
   mise reshim
   # Mirror every shim into /usr/local/bin so non-mise shells (and `sh -c`
-  # from democtl exec) see all tool binaries — cargo, rustc, go, gofmt, ...
+  # from stagehand exec) see all tool binaries — cargo, rustc, go, gofmt, ...
   if [ -d "$HOME/.local/share/mise/shims" ]; then
     for shim in "$HOME/.local/share/mise/shims"/*; do
       ln -sf "$shim" "/usr/local/bin/$(basename "$shim")"
@@ -206,7 +206,7 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
     ));
     println!(
         "\nnext: {} to start a demo VM",
-        util::bold("democtl new <demo>")
+        util::bold("stagehand new <demo>")
     );
     Ok(())
 }
@@ -342,7 +342,7 @@ fn install_artifacts(loaded: &Loaded, smol: &Smol) -> Result<()> {
     Ok(())
 }
 
-/// Unpack the pack's flattened rootfs layer into `.democtl/rootfs`.
+/// Unpack the pack's flattened rootfs layer into `.stagehand/rootfs`.
 ///
 /// Demo machines are created with `machine create --image <rootfs>` because
 /// smolvm's `create --from <pack>` silently drops `--credential` and

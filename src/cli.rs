@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "democtl",
+    name = "stagehand",
     version,
     about = "Run repeatable conference demos in disposable smolvm micro-VMs",
-    after_help = "Typical flow:\n  democtl init              write a starter demo.toml\n  democtl build             build the golden image (once)\n  democtl new checkout      fresh VM, fixed port, ready to demo\n  democtl stop checkout     preserve the session, free the machine"
+    after_help = "Typical flow:\n  stagehand init              write a starter demo.toml\n  stagehand build             build the golden image (once)\n  stagehand new checkout      fresh VM, fixed port, ready to demo\n  stagehand stop checkout     preserve the session, free the machine"
 )]
 pub struct Cli {
     /// Path to demo.toml (default: search upwards from the current directory)
@@ -128,7 +128,7 @@ pub enum Cmd {
         yes: bool,
     },
 
-    /// Delete every democtl-managed machine (after the conference)
+    /// Delete every stagehand-managed machine (after the conference)
     Prune {
         /// Also delete the template machine (the golden image is kept)
         #[arg(long)]

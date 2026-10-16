@@ -3,8 +3,8 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// Marker label put on every machine democtl creates.
-pub const LABEL_MANAGED: &str = "democtl";
+/// Marker label put on every machine stagehand creates.
+pub const LABEL_MANAGED: &str = "stagehand";
 /// Label carrying the demo name a machine belongs to.
 pub const LABEL_DEMO: &str = "demo";
 /// Label carrying the per-demo creation index.
@@ -15,7 +15,7 @@ pub const ROLE_TEMPLATE: &str = "template";
 /// Label marking the Linux build machine.
 pub const ROLE_BUILDER: &str = "builder";
 
-/// The golden image recipe (`[build]`): assembled by `democtl build`,
+/// The golden image recipe (`[build]`): assembled by `stagehand build`,
 /// cloned into every demo VM.
 #[derive(Debug, Clone)]
 pub struct BuildCfg {
@@ -26,7 +26,7 @@ pub struct BuildCfg {
     /// mise tool specs installed into the golden image (e.g. `node@lts`).
     /// Every binary they provide is put on PATH via mirrored shims.
     pub tools: Vec<String>,
-    /// What `democtl new`/`open` land in when no command override is given
+    /// What `stagehand new`/`open` land in when no command override is given
     /// (e.g. `["some-cli", "--flag"]`). Defaults to `shell`.
     pub entrypoint: Vec<String>,
     /// Extra shell script run inside the template after the default setup.
@@ -96,7 +96,7 @@ pub struct EffectiveDemo {
 
 /// Optional Linux artifact stage (`[builder]`): a separate machine that
 /// cross-compiles artifacts (e.g. from a host checkout mounted at `/src`)
-/// which `democtl build` installs into the golden image.
+/// which `stagehand build` installs into the golden image.
 #[derive(Debug, Clone)]
 pub struct BuilderCfg {
     pub image: String,
@@ -165,7 +165,7 @@ impl Config {
 #[derive(Debug, Clone)]
 pub struct Loaded {
     pub config: Config,
-    /// Per-project scratch/state directory (`<dir>/.democtl`).
+    /// Per-project scratch/state directory (`<dir>/.stagehand`).
     pub dot_dir: PathBuf,
     /// Name of the golden-image template machine.
     pub template_name: String,
@@ -308,7 +308,7 @@ impl Loaded {
             return Ok(self.config.demos.keys().next().unwrap().clone());
         }
         bail!(
-            "multiple demos configured ({}) and no default — pass one (democtl new <name>) or set [defaults] demo = \"...\"",
+            "multiple demos configured ({}) and no default — pass one (stagehand new <name>) or set [defaults] demo = \"...\"",
             self.demo_names()
         );
     }
@@ -470,7 +470,7 @@ pub fn load(explicit: Option<&Path>) -> Result<Loaded> {
             let cwd = std::env::current_dir().context("resolving current directory")?;
             find_up(&cwd).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "no demo.toml found in {} or any parent — run `democtl init` or pass --config",
+                    "no demo.toml found in {} or any parent — run `stagehand init` or pass --config",
                     cwd.display()
                 )
             })?
@@ -491,17 +491,17 @@ pub fn load(explicit: Option<&Path>) -> Result<Loaded> {
         }
     }
 
-    let dot_dir = dir.join(".democtl");
+    let dot_dir = dir.join(".stagehand");
     let golden_path = dot_dir.join("golden.smolmachine");
     let rootfs_path = dot_dir.join("rootfs");
     let artifacts_dir = dot_dir.join("artifacts");
     let slug = slug(&dir);
-    let template_name = format!("democtl-template-{slug}");
+    let template_name = format!("stagehand-template-{slug}");
     Ok(Loaded {
         config,
         dot_dir,
         template_name,
-        builder_name: format!("democtl-builder-{slug}"),
+        builder_name: format!("stagehand-builder-{slug}"),
         golden_path,
         rootfs_path,
         artifacts_dir,
@@ -526,13 +526,13 @@ pub fn slug(s: &Path) -> String {
     crate::util::ident(name)
 }
 
-pub const STARTER: &str = r#"# democtl configuration — one section per conference demo.
+pub const STARTER: &str = r#"# stagehand configuration — one section per conference demo.
 # Full reference in the project README.
 
 [build]
 image = "debian:bookworm-slim"    # base image for the golden image
 
-# What `democtl new` lands in. Drop the line for a plain shell.
+# What `stagehand new` lands in. Drop the line for a plain shell.
 # entrypoint = "some-cli"
 
 # mise tools installed into the image; every binary they provide lands on PATH.
@@ -629,7 +629,7 @@ mod tests {
 
     #[test]
     fn entrypoint_string_or_array_or_default() {
-        let dir = std::env::temp_dir().join(format!("democtl-ep-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stagehand-ep-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mk = |toml_text: &str| {
             let path = dir.join("demo.toml");
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn resolve_demo_prefers_explicit_then_pin_then_last_used_then_single() {
-        let dir = std::env::temp_dir().join(format!("democtl-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("stagehand-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let mk = |toml_text: &str| {
             let path = dir.join("demo.toml");

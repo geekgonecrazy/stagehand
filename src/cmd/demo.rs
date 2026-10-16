@@ -18,7 +18,7 @@ fn secret_refs(eff: &crate::config::EffectiveDemo) -> (Vec<String>, Vec<String>)
 }
 
 fn machine_name(demo: &str, idx: i64) -> String {
-    format!("democtl-{}-{idx}", ident(demo))
+    format!("stagehand-{}-{idx}", ident(demo))
 }
 
 /// Host env vars that must be present when the machine is started:
@@ -132,7 +132,7 @@ fn require_golden(loaded: &Loaded) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "golden rootfs not found at {} — build it first with `democtl build`",
+        "golden rootfs not found at {} — build it first with `stagehand build`",
         loaded.rootfs_path.display()
     );
 }
@@ -201,8 +201,8 @@ fn print_ready(eff: &crate::config::EffectiveDemo, name: &str) {
         util::bold(name),
         eff.host_port,
         eff.guest_port,
-        util::bold(&format!("democtl open {}", eff.name)),
-        util::bold(&format!("democtl stop {}", eff.name)),
+        util::bold(&format!("stagehand open {}", eff.name)),
+        util::bold(&format!("stagehand stop {}", eff.name)),
     );
 }
 
@@ -233,7 +233,7 @@ pub fn new(
             &program,
         )))?;
         util::warn(&format!(
-            "machine still running — `democtl stop {}` when the demo is done",
+            "machine still running — `stagehand stop {}` when the demo is done",
             eff.name
         ));
     }
@@ -275,7 +275,7 @@ pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, cmd: &[String]) -> Result<
     )))?;
     if m.running() {
         util::warn(&format!(
-            "machine still running — `democtl stop {}` when the demo is done",
+            "machine still running — `stagehand stop {}` when the demo is done",
             eff.name
         ));
     }
@@ -284,7 +284,7 @@ pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, cmd: &[String]) -> Result<
 
 pub fn exec(loaded: &Loaded, smol: &Smol, demo: &str, detach: bool, cmd: &[String]) -> Result<()> {
     if cmd.is_empty() {
-        bail!("nothing to run — try: democtl exec {demo} -- ls -la");
+        bail!("nothing to run — try: stagehand exec {demo} -- ls -la");
     }
     let eff = loaded.config.effective(demo)?;
     let m = target(smol, demo)?;
@@ -312,7 +312,7 @@ pub fn url(loaded: &Loaded, smol: &Smol, demo: &str) -> Result<()> {
             util::dim(&format!("{} is {}", m.name, m.state))
         );
     } else {
-        eprintln!("{}", util::dim(&format!("no machine yet — `democtl new {demo}`")));
+        eprintln!("{}", util::dim(&format!("no machine yet — `stagehand new {demo}`")));
     }
     Ok(())
 }
@@ -366,14 +366,14 @@ mod tests {
             secret_env: vec!["K".into()],
             credentials,
         };
-        let a = create_args(&loaded, &eff, "democtl-my-demo-1", 1, &["K=K".to_string()]);
+        let a = create_args(&loaded, &eff, "stagehand-my-demo-1", 1, &["K=K".to_string()]);
         let s: Vec<&str> = a.iter().map(String::as_str).collect();
         assert_eq!(
             s,
             vec![
-                "machine", "create", "--name", "democtl-my-demo-1", "--image", "/p/.democtl/rootfs",
+                "machine", "create", "--name", "stagehand-my-demo-1", "--image", "/p/.stagehand/rootfs",
                 "--net", "-p", "8410:8080",
-                "--label", "democtl=1", "--label", "demo=my-demo", "--label", "idx=1",
+                "--label", "stagehand=1", "--label", "demo=my-demo", "--label", "idx=1",
                 "--ssh-agent",
                 "--credential", "MY_API_KEY=MY_API_KEY@api.example.com",
                 "--secret-env", "MY_API_KEY=MY_API_KEY",
@@ -407,18 +407,18 @@ mod tests {
                 },
                 demos: Default::default(),
             },
-            dot_dir: "/p/.democtl".into(),
-            template_name: "democtl-template-p".into(),
-            golden_path: "/p/.democtl/golden.smolmachine".into(),
-            rootfs_path: "/p/.democtl/rootfs".into(),
-            builder_name: "democtl-builder-p".into(),
-            artifacts_dir: "/p/.democtl/artifacts".into(),
+            dot_dir: "/p/.stagehand".into(),
+            template_name: "stagehand-template-p".into(),
+            golden_path: "/p/.stagehand/golden.smolmachine".into(),
+            rootfs_path: "/p/.stagehand/rootfs".into(),
+            builder_name: "stagehand-builder-p".into(),
+            artifacts_dir: "/p/.stagehand/artifacts".into(),
         }
     }
 
     #[test]
     fn machine_names_are_ident_safe() {
-        assert_eq!(machine_name("My Demo!", 3), "democtl-my-demo-3");
+        assert_eq!(machine_name("My Demo!", 3), "stagehand-my-demo-3");
         assert_eq!(crate::config::ROLE_TEMPLATE, "template");
     }
 }

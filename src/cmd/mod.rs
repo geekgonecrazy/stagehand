@@ -9,7 +9,7 @@ use anyhow::Result;
 pub fn target(smol: &Smol, demo: &str) -> Result<Machine> {
     smol.newest_for_demo(demo)?.ok_or_else(|| {
         anyhow::anyhow!(
-            "no machine for demo `{demo}` yet — start one with `democtl new {demo}`"
+            "no machine for demo `{demo}` yet — start one with `stagehand new {demo}`"
         )
     })
 }

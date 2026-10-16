@@ -1,4 +1,4 @@
-# democtl
+# stagehand
 
 Run repeatable conference demos in disposable [smolvm](https://smolmachines.com) micro-VMs.
 
@@ -10,35 +10,35 @@ workspace stay preserved on the VM's disk, ready to resume, and nothing keeps
 running on your Mac.
 
 ```
-democtl build            # once: template VM → golden image with your tools
-democtl new              # fresh VM, fixed port, lands in the image entrypoint
-democtl new -- bash      # override the entrypoint for this run
-democtl new --no-attach  # start it without attaching
-democtl open             # re-attach later (boots it if stopped; session intact)
-democtl stop             # done: VM stopped, session preserved
-democtl start            # later: same machine back at the same URL
-democtl prune            # after the conference: delete every demo VM
+stagehand build            # once: template VM → golden image with your tools
+stagehand new              # fresh VM, fixed port, lands in the image entrypoint
+stagehand new -- bash      # override the entrypoint for this run
+stagehand new --no-attach  # start it without attaching
+stagehand open             # re-attach later (boots it if stopped; session intact)
+stagehand stop             # done: VM stopped, session preserved
+stagehand start            # later: same machine back at the same URL
+stagehand prune            # after the conference: delete every demo VM
 ```
 
 Demo names are optional: unnamed commands resolve to the `[defaults] demo`
 pin, else the demo you last touched, else the only configured demo. Pass a
-name (`democtl new search`) when you mean a different one. `democtl new`
+name (`stagehand new search`) when you mean a different one. `stagehand new`
 archives any still-running run of the same demo first (session preserved),
 so the fixed port is always free.
 
 ## Why this shape
 
-- **A fresh VM per demo run.** `democtl new checkout` clones a golden image
+- **A fresh VM per demo run.** `stagehand new checkout` clones a golden image
   (`create --from`, ~sub-second boot), so every showing of the demo starts
   from a known-good state. Old machines are kept, not deleted — run the same
-  demo five times and you get `democtl-checkout-1..5`, each preserved.
+  demo five times and you get `stagehand-checkout-1..5`, each preserved.
 - **Fixed ports, declared once.** Each demo gets a permanent host port in
   `demo.toml` (`checkout → 8410`). Forwarding is attached to the VM at
   creation, so `http://localhost:8410` works the moment the guest listens —
   and it is the same place every single time.
 - **Sessions survive the machine stopping.** Tools store their session
-  history and workspace on the VM's persistent overlay. `democtl stop` halts
-  the VM (no CPU/RAM use); `democtl open` boots it again with the session
+  history and workspace on the VM's persistent overlay. `stagehand stop` halts
+  the VM (no CPU/RAM use); `stagehand open` boots it again with the session
   intact.
 - **Secrets stay on the host.** Provider keys are bound **host-side** with
   smolvm's credential feature: the VM only ever sees a meaningless
@@ -50,7 +50,7 @@ so the fixed port is always free.
 ## Install
 
 ```sh
-cargo install --path .          # installs `democtl` onto your PATH
+cargo install --path .          # installs `stagehand` onto your PATH
 ```
 
 Requires `smolvm` on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
@@ -60,21 +60,21 @@ Requires `smolvm` on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
 In any directory (it becomes your demo workspace):
 
 ```sh
-democtl init                    # writes a starter demo.toml
+stagehand init                    # writes a starter demo.toml
 $EDITOR demo.toml               # one [demos.<name>] section per demo, with a fixed port
-democtl build                   # ~5 min once: installs packages + tools in a
+stagehand build                   # ~5 min once: installs packages + tools in a
                                 #   template VM, then packs and extracts it to
-                                #   .democtl/rootfs (what demo machines clone)
+                                #   .stagehand/rootfs (what demo machines clone)
 ```
 
 `demo.toml` reference:
 
 ```toml
-[build]                        # the golden image recipe — assembled by `democtl build`
+[build]                        # the golden image recipe — assembled by `stagehand build`
 image = "debian:bookworm-slim" # base image
 packages = ["git", "curl"]     # distro packages installed into the image
 tools = ["node@lts", "some-cli@latest"]  # mise tools installed into the image
-entrypoint = "some-cli"        # what `democtl new` lands in (default: shell)
+entrypoint = "some-cli"        # what `stagehand new` lands in (default: shell)
 shell = "/bin/bash"            # shell used when no entrypoint is set
 workspace = "/workspace"       # working directory for new/open/exec
 setup = """                    # extra provisioning script, runs in the template
@@ -92,7 +92,7 @@ cp /build/target/release/my-tool /build/artifacts/my-tool
 """
 
 [defaults]
-demo = "checkout"              # what an unnamed `democtl new`/`open`/`stop` means
+demo = "checkout"              # what an unnamed `stagehand new`/`open`/`stop` means
 guest_port = 8080              # where your webapp listens inside the VM
 net = true                     # outbound networking from the VM
 ssh_agent = true               # forward the host SSH agent (git push/pull from the VM)
@@ -121,31 +121,31 @@ into it at `/usr/local/bin/`. Demo VMs are clones of that image.
 
 Tooling is managed by [mise](https://mise.jdx.dev): `tools` specs are installed
 with `mise use -g` in the respective VM, and every template tool is symlinked
-to `/usr/local/bin/` so non-mise shells (and `democtl exec`) see it.
+to `/usr/local/bin/` so non-mise shells (and `stagehand exec`) see it.
 
 Artifacts built by `[build]` land at `/usr/local/bin/<name>` in the golden
-image — `democtl build` runs `<artifact> --version` inside the template to
-verify each one. The builder machine persists (`democtl-builder-<dir>`), so
+image — `stagehand build` runs `<artifact> --version` inside the template to
+verify each one. The builder machine persists (`stagehand-builder-<dir>`), so
 toolchains and `target/` survive across builds; only the first build is slow
 (a cold Rust build took ~5 min; rebuilds are seconds).
-`democtl build --force` recreates both template and builder.
+`stagehand build --force` recreates both template and builder.
 
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `democtl init` | Write a starter `demo.toml` |
-| `democtl build [--force]` | (Re)build the golden image from the `[build]` recipe + `[builder]` stage |
-| `democtl new <demo> [--no-attach] [-- cmd]` | Fresh VM from the golden image, started, lands in the entrypoint |
-| `democtl open <demo> [-- cmd]` | Attach to the newest machine — image entrypoint, or a command override (boots it first if stopped) |
-| `democtl exec <demo> [--detach] [-- cmd]` | Run a one-off command (`--detach` for background servers) |
-| `democtl url <demo>` | Print the demo's permanent URL |
-| `democtl start <demo>` | Boot the newest machine again (resume) |
-| `democtl stop <demo>` | Stop the newest machine, session preserved |
-| `democtl list` | Demos, machines, states, URLs |
-| `democtl reset <demo>` | Throw away the newest machine, start a fresh one (same port) |
-| `democtl rm <demo> [--all]` | Delete machines of a demo |
-| `democtl prune [--template]` | Delete **all** demo machines (conference is over) |
+| `stagehand init` | Write a starter `demo.toml` |
+| `stagehand build [--force]` | (Re)build the golden image from the `[build]` recipe + `[builder]` stage |
+| `stagehand new <demo> [--no-attach] [-- cmd]` | Fresh VM from the golden image, started, lands in the entrypoint |
+| `stagehand open <demo> [-- cmd]` | Attach to the newest machine — image entrypoint, or a command override (boots it first if stopped) |
+| `stagehand exec <demo> [--detach] [-- cmd]` | Run a one-off command (`--detach` for background servers) |
+| `stagehand url <demo>` | Print the demo's permanent URL |
+| `stagehand start <demo>` | Boot the newest machine again (resume) |
+| `stagehand stop <demo>` | Stop the newest machine, session preserved |
+| `stagehand list` | Demos, machines, states, URLs |
+| `stagehand reset <demo>` | Throw away the newest machine, start a fresh one (same port) |
+| `stagehand rm <demo> [--all]` | Delete machines of a demo |
+| `stagehand prune [--template]` | Delete **all** demo machines (conference is over) |
 
 Every per-demo command targets the *most recent* machine of that demo. `list`
 shows what that is.
@@ -155,52 +155,52 @@ shows what that is.
 The night before:
 
 ```sh
-democtl build                   # refresh the golden image if [build] changed
-democtl new checkout && democtl stop checkout   # dress rehearsal, machine stays archived
+stagehand build                   # refresh the golden image if [build] changed
+stagehand new checkout && stagehand stop checkout   # dress rehearsal, machine stays archived
 ```
 
 On stage, per showing:
 
 ```sh
-democtl new                     # fresh VM + straight into the entrypoint (no name needed)
+stagehand new                     # fresh VM + straight into the entrypoint (no name needed)
 # ... run the demo; the webapp is at http://localhost:8410 ...
 #   start a webserver from another terminal, e.g.:
-#   democtl exec --detach -- python3 -m http.server 8080 --directory /workspace
-democtl stop                    # VM off, nothing running, session archived
+#   stagehand exec --detach -- python3 -m http.server 8080 --directory /workspace
+stagehand stop                    # VM off, nothing running, session archived
 ```
 
 Questions from the audience about yesterday's run?
 
 ```sh
-democtl open checkout           # boots the archived machine with the session intact
+stagehand open checkout           # boots the archived machine with the session intact
 ```
 
 Flying home:
 
 ```sh
-democtl list                    # see everything
-democtl prune                   # delete all demo VMs (golden image is kept)
+stagehand list                    # see everything
+stagehand prune                   # delete all demo VMs (golden image is kept)
 ```
 
 ## Notes
 
-- Machine names (`democtl-checkout-3`) and the demo they belong to are tracked
-  via smolvm labels, so `list`/`rm`/`prune` only ever touch democtl's own
+- Machine names (`stagehand-checkout-3`) and the demo they belong to are tracked
+  via smolvm labels, so `list`/`rm`/`prune` only ever touch stagehand's own
   machines.
-- The golden image lives under `.democtl/` next to your `demo.toml`
+- The golden image lives under `.stagehand/` next to your `demo.toml`
   (gitignored): `rootfs/` is what demo machines clone, `golden.smolmachine`
   is the portable pack it was extracted from. Deleting both is safe —
-  `democtl build` recreates them.
-- The template machine `democtl-template-<dir>` is reused across builds; pass
+  `stagehand build` recreates them.
+- The template machine `stagehand-template-<dir>` is reused across builds; pass
   `--force` to rebuild it from scratch.
 - Every `tools` binary is on PATH in the image; sessions start in
   `/workspace` (created empty in the golden image). Git works out of the box
   through the forwarded SSH agent.
 - Credential bindings resolve the real value from the environment of whatever
-  shell **starts** the machine (`democtl new` / `start`). If it's missing,
+  shell **starts** the machine (`stagehand new` / `start`). If it's missing,
   requests to the bound hosts fail closed with
   `smolvm credentials: credential unavailable` — set the var and restart the
-  machine. democtl warns at start when it can tell a var is missing.
+  machine. stagehand warns at start when it can tell a var is missing.
 - Demo machines are created with `machine create --image <rootfs>` rather
   than `--from <pack>` because smolvm 1.18.0 silently drops
   `--credential`/`--secret-env` flags on the pack path.
