@@ -238,10 +238,10 @@ mod tests {
 
     #[test]
     fn exec_args_shape() {
-        let args = exec_args("vm", "/workspace", true, false, &["K=K".into()], &["opencode".into()]);
+        let args = exec_args("vm", "/workspace", true, false, &["K=K".into()], &["tool".into()]);
         assert_eq!(
             args,
-            vec!["machine", "exec", "-i", "-t", "-w", "/workspace", "--name", "vm", "--secret-env", "K=K", "--", "opencode"]
+            vec!["machine", "exec", "-i", "-t", "-w", "/workspace", "--name", "vm", "--secret-env", "K=K", "--", "tool"]
         );
         let detached = exec_args("vm", "/workspace", false, true, &[], &["serve".into()]);
         assert_eq!(

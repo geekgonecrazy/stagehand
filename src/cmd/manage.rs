@@ -15,7 +15,7 @@ pub fn init(config_flag: &Option<std::path::PathBuf>) -> Result<()> {
     std::fs::write(&path, config::STARTER).with_context(|| format!("writing {}", path.display()))?;
     util::ok(&format!("wrote {}", path.display()));
     println!(
-        "\nnext:\n  1. edit [demos.*] — one section per demo, each with a fixed {}\n  2. {}  (installs opencode into a template VM, once)\n  3. {}",
+        "\nnext:\n  1. edit [demos.*] — one section per demo, each with a fixed {}\n  2. {}  (installs your tools into a template VM, once)\n  3. {}",
         util::bold("port"),
         util::bold("democtl build"),
         util::bold("democtl new <demo>")

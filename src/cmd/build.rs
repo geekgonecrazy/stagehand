@@ -74,7 +74,7 @@ fn build_script(tpl: &crate::config::TemplateCfg) -> String {
         .replace("__SETUP__", &setup)
 }
 
-/// The tool name part of a mise spec: `opencode@1.19.0` → `opencode`.
+/// The tool name part of a mise spec: `some-cli@1.19.0` → `some-cli`.
 fn tool_name(spec: &str) -> &str {
     spec.split('@').next().unwrap_or(spec)
 }
@@ -161,7 +161,7 @@ pub fn run(loaded: &Loaded, smol: &Smol, force: bool) -> Result<()> {
 
     println!(
         "{}",
-        util::bold("==> installing packages + opencode (first build takes a few minutes)")
+        util::bold("==> installing packages + tools (first build takes a few minutes)")
     );
     // Pipe the script through `exec -i -- sh -s`: exec only forwards host
     // stdin with `-i`, and `--stream` gives live progress for long installs.
@@ -429,7 +429,8 @@ mod tests {
             cpus: None,
             mem_mib: None,
             packages: vec!["curl".into(), "git".into()],
-            tools: vec!["opencode@1.19.0".into()],
+            tools: vec!["some-cli@1.0".into()],
+            entrypoint: vec![],
             setup: Some("echo hi".into()),
             shell: "/bin/bash".into(),
             workspace: "/workspace".into(),
@@ -438,10 +439,10 @@ mod tests {
         assert!(s.contains("curl git"));
         assert!(s.contains("echo hi"));
         assert!(s.contains("mkdir -p \"/workspace\""));
-        assert!(s.contains("if [ -n \"opencode@1.19.0\" ]; then"));
-        assert!(s.contains("for tool in opencode@1.19.0; do mise use -g \"$tool\"; done"));
+        assert!(s.contains("if [ -n \"some-cli@1.0\" ]; then"));
+        assert!(s.contains("for tool in some-cli@1.0; do mise use -g \"$tool\"; done"));
         assert!(s.contains("for shim in \"$HOME/.local/share/mise/shims\"/*; do"));
-        assert!(s.contains("for tool in opencode; do"));
+        assert!(s.contains("for tool in some-cli; do"));
         assert!(s.contains("if [ -e \"/usr/local/bin/$tool\" ]"));
     }
 
@@ -453,6 +454,7 @@ mod tests {
             mem_mib: None,
             packages: vec![],
             tools: vec![],
+            entrypoint: vec![],
             setup: None,
             shell: "/bin/bash".into(),
             workspace: "/workspace".into(),
@@ -471,7 +473,7 @@ mod tests {
 
     #[test]
     fn tool_name_strips_version() {
-        assert_eq!(tool_name("opencode@1.19.0"), "opencode");
+        assert_eq!(tool_name("some-cli@1.0"), "some-cli");
         assert_eq!(tool_name("rust"), "rust");
     }
 }

@@ -2,17 +2,17 @@
 
 Run repeatable conference demos in disposable [smolvm](https://smolmachines.com) micro-VMs.
 
-One command starts a **fresh Linux VM with opencode already installed**, your API keys
-and SSH agent forwarded in, and the demo's webapp port reachable at a URL that never
-changes. When the demo is over, one command stops the VM — the opencode session and
-workspace stay preserved on the VM's disk, ready to resume, and nothing keeps running
-on your Mac.
+One command starts a **fresh Linux VM with your tools already installed** (an AI
+harness, language toolchains — whatever `demo.toml` declares), your API keys and
+SSH agent forwarded in, and the demo's webapp port reachable at a URL that never
+changes. When the demo is over, one command stops the VM — the session and
+workspace stay preserved on the VM's disk, ready to resume, and nothing keeps
+running on your Mac.
 
 ```
-democtl build            # once: template VM → golden image (opencode preinstalled)
-democtl new              # fresh VM, fixed port, lands you inside opencode
-democtl new --shell      # land in a shell instead
-democtl new -- python3   # land in any command
+democtl build            # once: template VM → golden image with your tools
+democtl new              # fresh VM, fixed port, lands in the image entrypoint
+democtl new -- bash      # override the entrypoint for this run
 democtl new --no-attach  # start it without attaching
 democtl open             # re-attach later (boots it if stopped; session intact)
 democtl stop             # done: VM stopped, session preserved
@@ -36,7 +36,7 @@ so the fixed port is always free.
   `demo.toml` (`checkout → 8410`). Forwarding is attached to the VM at
   creation, so `http://localhost:8410` works the moment the guest listens —
   and it is the same place every single time.
-- **Sessions survive the machine stopping.** opencode stores its session
+- **Sessions survive the machine stopping.** Tools store their session
   history and workspace on the VM's persistent overlay. `democtl stop` halts
   the VM (no CPU/RAM use); `democtl open` boots it again with the session
   intact.
@@ -62,7 +62,7 @@ In any directory (it becomes your demo workspace):
 ```sh
 democtl init                    # writes a starter demo.toml
 $EDITOR demo.toml               # one [demos.<name>] section per demo, with a fixed port
-democtl build                   # ~5 min once: installs packages + opencode in a
+democtl build                   # ~5 min once: installs packages + tools in a
                                 #   template VM, then packs and extracts it to
                                 #   .democtl/rootfs (what demo machines clone)
 ```
@@ -72,7 +72,6 @@ democtl build                   # ~5 min once: installs packages + opencode in a
 ```toml
 [defaults]
 demo = "checkout"               # what an unnamed `democtl new`/`open`/`stop` means
-attach = "opencode"             # what `democtl new` lands in: "opencode" or "shell"
 guest_port = 8080               # where your webapp listens inside the VM
 
 # Host-side credential bindings (recommended): the VM sees a placeholder,
@@ -92,9 +91,9 @@ ssh_agent = true                # forward the host SSH agent (git push/pull from
 image = "debian:bookworm-slim"  # base image for the template
 packages = ["git", "curl"]      # extra packages installed into the golden image
 setup = """                     # extra setup shell script, runs in the template
-mkdir -p /tmp/smoke && cd /tmp/smoke && atomic init
-atomic agent enable --agent opencode
+your-setup-command --here
 """
+entrypoint = "opencode"         # what `democtl new` lands in (default: shell)
 shell = "/bin/bash"             # what `democtl open` drops you into
 workspace = "/workspace"        # working directory for open/exec
 tools = ["node@lts", "opencode@latest"]  # mise tools installed into the image
@@ -132,8 +131,8 @@ toolchains and `target/` survive across builds; only the first build is slow
 |---|---|
 | `democtl init` | Write a starter `demo.toml` |
 | `democtl build [--force]` | (Re)build the golden image from the `[template]` recipe |
-| `democtl new <demo> [--attach]` | Fresh VM from the golden image, started, port live |
-| `democtl open <demo> [--opencode] [-- cmd]` | Attach to the newest machine (shell by default; boots it first if stopped) |
+| `democtl new <demo> [--no-attach] [-- cmd]` | Fresh VM from the golden image, started, lands in the entrypoint |
+| `democtl open <demo> [-- cmd]` | Attach to the newest machine — image entrypoint, or a command override (boots it first if stopped) |
 | `democtl exec <demo> [--detach] [-- cmd]` | Run a one-off command (`--detach` for background servers) |
 | `democtl url <demo>` | Print the demo's permanent URL |
 | `democtl start <demo>` | Boot the newest machine again (resume) |

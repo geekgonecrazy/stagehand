@@ -21,21 +21,33 @@ pub struct TemplateCfg {
     pub cpus: Option<u32>,
     pub mem_mib: Option<u32>,
     pub packages: Vec<String>,
-    /// mise tool specs installed into the golden image (e.g. `opencode@latest`).
-    /// Each tool is also symlinked to /usr/local/bin so non-mise shells see it.
+    /// mise tool specs installed into the golden image (e.g. `node@lts`).
+    /// Every binary they provide is put on PATH via mirrored shims.
     pub tools: Vec<String>,
+    /// What `democtl new`/`open` land in when no command override is given
+    /// (e.g. `["some-cli", "--flag"]`). Defaults to `shell`.
+    pub entrypoint: Vec<String>,
     /// Extra shell script run inside the template after the default setup.
     pub setup: Option<String>,
     pub shell: String,
     pub workspace: String,
 }
 
+impl TemplateCfg {
+    /// The programs `new`/`open` attach to when not overridden per-invocation.
+    pub fn entrypoint_programs(&self) -> Vec<String> {
+        if self.entrypoint.is_empty() {
+            vec![self.shell.clone()]
+        } else {
+            self.entrypoint.clone()
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DefaultsCfg {
     /// Demo used when a command is given without an explicit name.
     pub demo: Option<String>,
-    /// What `democtl new` attaches to: "opencode" (default) or "shell".
-    pub attach: Option<String>,
     pub net: bool,
     pub ssh_agent: bool,
     pub secret_env: Vec<String>,
@@ -206,6 +218,24 @@ impl RawBuild {
     }
 }
 
+/// A config value that accepts either a single string or a list of strings
+/// (e.g. `entrypoint = "some-cli"` or `entrypoint = ["some-cli", "--flag"]`).
+#[derive(Deserialize, Debug)]
+#[serde(untagged)]
+enum OneOrMany {
+    One(String),
+    Many(Vec<String>),
+}
+
+impl OneOrMany {
+    fn into_vec(self) -> Vec<String> {
+        match self {
+            OneOrMany::One(s) => vec![s],
+            OneOrMany::Many(v) => v,
+        }
+    }
+}
+
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 struct RawTemplate {
@@ -214,6 +244,7 @@ struct RawTemplate {
     mem: Option<u32>,
     packages: Option<Vec<String>>,
     tools: Option<Vec<String>>,
+    entrypoint: Option<OneOrMany>,
     setup: Option<String>,
     shell: Option<String>,
     workspace: Option<String>,
@@ -292,7 +323,6 @@ struct State {
 #[serde(default)]
 struct RawDefaults {
     demo: Option<String>,
-    attach: Option<String>,
     net: Option<bool>,
     ssh_agent: Option<bool>,
     secret_env: Option<Vec<String>>,
@@ -372,6 +402,7 @@ impl RawConfig {
                 mem_mib: t.mem,
                 packages: t.packages.unwrap_or_else(default_packages),
                 tools: t.tools.unwrap_or_default(),
+                entrypoint: t.entrypoint.map(OneOrMany::into_vec).unwrap_or_default(),
                 setup: t.setup,
                 shell: t.shell.unwrap_or_else(|| "/bin/bash".into()),
                 workspace: t.workspace.unwrap_or_else(|| "/workspace".into()),
@@ -379,13 +410,6 @@ impl RawConfig {
             build,
             defaults: DefaultsCfg {
                 demo: d.demo,
-                attach: match d.attach.as_deref() {
-                    None => None,
-                    Some("opencode") | Some("shell") => d.attach,
-                    Some(other) => bail!(
-                        "[defaults] attach must be \"opencode\" or \"shell\", got \"{other}\""
-                    ),
-                },
                 net: d.net.unwrap_or(true),
                 ssh_agent: d.ssh_agent.unwrap_or(true),
                 secret_env: d.secret_env.unwrap_or_default(),
@@ -502,20 +526,26 @@ pub const STARTER: &str = r#"# democtl configuration — one section per confere
 [defaults]
 guest_port = 8080                 # port your webapp listens on inside the VM
 
-# Credentials bound HOST-SIDE: the VM only ever sees a SMOL_PLACEHOLDER_*
+# Credentials bound HOST-SIDE: the VM only ever sees a SMOLPLACEHOLDER_*
 # value; smolvm substitutes the real value from your shell env on HTTPS
 # requests to the hosts you list. The secret itself never enters the VM.
 # List EVERY host the credential is sent to, matching what the client
-# really connects to (e.g. OpenRouter's API host is "openrouter.ai").
-# The var must be set in your shell when a machine is STARTED.
+# really connects to. The var must be set in your shell when a machine
+# is STARTED.
 #
-# [defaults.credentials.OPENROUTER_API_KEY]
-# hosts = ["openrouter.ai"]
+# [defaults.credentials.MY_API_KEY]
+# hosts = ["api.example.com"]
 
 # For secrets that must be plainly visible inside the VM (non-HTTPS use):
 # secret_env = ["SOME_PLAIN_TOKEN"]
 # net = true                      # outbound networking (default true)
 # ssh_agent = true                # forward your SSH agent for git pushes (default true)
+
+[template]
+# tools = ["node@lts", "some-cli@latest"]  # mise tools installed into the image
+# entrypoint = "some-cli"                 # what `democtl new` lands in (default: shell)
+# packages = ["git", "curl"]              # extra distro packages
+# setup = """..."""                       # extra setup script, runs in the template
 
 [demos.checkout]
 port = 8410                       # the demo is ALWAYS at http://localhost:8410
@@ -581,6 +611,40 @@ mod tests {
         let raw: RawConfig = toml::from_str("[defaults.credentials.X]\n").unwrap();
         let cfg: Config = raw.into_config().unwrap();
         assert!(cfg.defaults.credentials.is_empty());
+    }
+
+    #[test]
+    fn entrypoint_string_or_array_or_default() {
+        let dir = std::env::temp_dir().join(format!("democtl-ep-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mk = |toml_text: &str| {
+            let path = dir.join("demo.toml");
+            std::fs::write(&path, toml_text).unwrap();
+            load(Some(&path)).unwrap()
+        };
+
+        // string form
+        let loaded = mk("[template]\nentrypoint = \"some-cli\"\n[demos.x]\nport=1\n");
+        assert_eq!(
+            loaded.config.template.entrypoint_programs(),
+            vec!["some-cli".to_string()]
+        );
+
+        // array form (program + args)
+        let loaded = mk("[template]\nentrypoint = [\"some-cli\", \"--flag\"]\n[demos.x]\nport=1\n");
+        assert_eq!(
+            loaded.config.template.entrypoint_programs(),
+            vec!["some-cli".to_string(), "--flag".to_string()]
+        );
+
+        // absent → shell
+        let loaded = mk("[demos.x]\nport=1\n");
+        assert_eq!(
+            loaded.config.template.entrypoint_programs(),
+            vec!["/bin/bash".to_string()]
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

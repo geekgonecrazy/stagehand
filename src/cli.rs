@@ -39,24 +39,20 @@ pub enum Cmd {
     /// Write a starter demo.toml in the current directory
     Init,
 
-    /// Build (or refresh) the golden image with opencode preinstalled
+    /// Build (or refresh) the golden image with your tools preinstalled
     Build {
         /// Recreate the template machine from scratch
         #[arg(long)]
         force: bool,
     },
 
-    /// Start a fresh VM for a demo from the golden image and attach to it
+    /// Start a fresh VM from the golden image and land in its entrypoint
     New {
         /// Demo name from demo.toml (optional — uses the default, last
         /// used, or the only configured demo)
         demo: Option<String>,
 
-        /// Land in a shell instead of opencode (or [defaults] attach)
-        #[arg(long)]
-        shell: bool,
-
-        /// Run this command instead of attaching to opencode (after `--`)
+        /// Run this command instead of the image entrypoint (after `--`)
         #[arg(last = true)]
         cmd: Vec<String>,
 
@@ -70,11 +66,7 @@ pub enum Cmd {
         /// Demo name from demo.toml (optional)
         demo: Option<String>,
 
-        /// Attach to opencode instead of a shell
-        #[arg(long)]
-        opencode: bool,
-
-        /// Run this command instead of a shell (after `--`)
+        /// Run this command instead of the image entrypoint (after `--`)
         #[arg(last = true)]
         cmd: Vec<String>,
     },

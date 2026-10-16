@@ -180,7 +180,7 @@ pub fn spawn_fresh(
     }
     warn_missing_env(eff, "the machine starts without these");
     if eff.secret_env.is_empty() && eff.credentials.is_empty() {
-        util::warn("no credentials configured — opencode in the VM may have no provider API key");
+        util::warn("no credentials configured — tools in the VM that need API keys won't have them");
     }
 
     let args = create_args(loaded, eff, &name, idx, &secrets);
@@ -211,7 +211,6 @@ pub fn new(
     smol: &Smol,
     demo: &str,
     no_attach: bool,
-    shell: bool,
     cmd: &[String],
 ) -> Result<()> {
     let eff = loaded.config.effective(demo)?;
@@ -219,14 +218,11 @@ pub fn new(
     let (name, secrets) = spawn_fresh(loaded, smol, &eff)?;
     print_ready(&eff, &name);
     if !no_attach {
-        // Landing target: explicit `-- cmd` > --shell flag > [defaults] attach
-        // > opencode.
+        // Landing target: explicit `-- cmd` > image entrypoint (shell default)
         let program: Vec<String> = if !cmd.is_empty() {
             cmd.to_vec()
-        } else if shell || loaded.config.defaults.attach.as_deref() == Some("shell") {
-            vec![tpl.shell.clone()]
         } else {
-            vec!["opencode".to_string()]
+            tpl.entrypoint_programs()
         };
         smol.run_inherit(&refs(&exec_args(
             &name,
@@ -256,19 +252,18 @@ fn ensure_running(smol: &Smol, m: &Machine, eff: &EffectiveDemo) -> Result<()> {
     smol.run_inherit(&["machine", "start", "--name", &m.name])
 }
 
-pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, use_opencode: bool, cmd: &[String]) -> Result<()> {
+pub fn open(loaded: &Loaded, smol: &Smol, demo: &str, cmd: &[String]) -> Result<()> {
     let eff = loaded.config.effective(demo)?;
     let m = target(smol, demo)?;
     ensure_running(smol, &m, &eff)?;
 
     let (secrets, _) = secret_refs(&eff);
     let tpl = &loaded.config.template;
+    // Command override > image entrypoint (shell default)
     let program: Vec<String> = if !cmd.is_empty() {
         cmd.to_vec()
-    } else if use_opencode {
-        vec!["opencode".to_string()]
     } else {
-        vec![tpl.shell.clone()]
+        tpl.entrypoint_programs()
     };
     smol.run_inherit(&refs(&exec_args(
         &m.name,
@@ -396,6 +391,7 @@ mod tests {
                     mem_mib: None,
                     packages: vec![],
                     tools: vec![],
+                    entrypoint: vec![],
                     setup: None,
                     shell: "/bin/bash".into(),
                     workspace: "/workspace".into(),
@@ -403,7 +399,6 @@ mod tests {
                 build: None,
                 defaults: crate::config::DefaultsCfg {
                     demo: None,
-                    attach: None,
                     net: true,
                     ssh_agent: true,
                     secret_env: vec![],

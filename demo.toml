@@ -23,9 +23,11 @@ cp /build/target/release/atomic /build/artifacts/atomic
 """
 
 [template]
+# What `democtl new` lands in — swap for any harness installed via tools
+# (e.g. "claude", "gemini"), or drop the line to land in a plain shell.
+entrypoint = "opencode"
 # Demo toolchains via mise; every binary lands on PATH through mirrored shims.
 # node is required by opencode 2.x (npm package postinstall).
-# build-essential provides cc so cargo can link.
 tools = ["node@lts", "opencode@latest", "go@latest", "rust@stable"]
 packages = [
   "ca-certificates", "curl", "git", "jq", "less", "ripgrep", "unzip",
