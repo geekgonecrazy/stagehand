@@ -21,6 +21,18 @@ SSH agent forwarded in, and the demo's webapp port reachable at a URL that never
 changes. When you exit, the machine stops itself — the session stays preserved
 on the VM's disk, ready to resume, and nothing keeps running on your Mac.
 
+## Install
+
+Grab a prebuilt binary from [Releases](https://github.com/geekgonecrazy/stagehand/releases)
+(macOS arm, Linux x64/arm64 — static on Linux), or build from source:
+
+```sh
+cargo install --path .          # installs `stagehand` onto your PATH
+```
+
+Requires [smolvm](https://smolmachines.com) on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
+Toolchains (mise, rust, go, …) live inside the VMs — the host never needs them.
+
 ```
 stagehand build            # once: template VM → golden image with your tools
 stagehand new              # fresh VM, fixed port, drops you inside —
@@ -210,18 +222,6 @@ stagehand strike                # delete all demo VMs (golden image is kept)
 - Demo machines are created with `machine create --image <rootfs>` rather
   than `--from <pack>` because smolvm 1.18.0 silently drops
   `--credential`/`--secret-env` flags on the pack path.
-
-## Install
-
-Grab a prebuilt binary from [Releases](https://github.com/geekgonecrazy/stagehand/releases)
-(macOS arm, Linux x64/arm64 — static on Linux), or build from source:
-
-```sh
-cargo install --path .          # installs `stagehand` onto your PATH
-```
-
-Requires [smolvm](https://smolmachines.com) on PATH (or `SMOLVM_BIN=/path/to/smolvm`).
-Toolchains (mise, rust, go, …) live inside the VMs — the host never needs them.
 
 ## License
 
