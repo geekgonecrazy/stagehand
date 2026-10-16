@@ -206,20 +206,35 @@ fn print_ready(eff: &crate::config::EffectiveDemo, name: &str) {
     );
 }
 
-pub fn new(loaded: &Loaded, smol: &Smol, demo: &str, attach: bool) -> Result<()> {
+pub fn new(
+    loaded: &Loaded,
+    smol: &Smol,
+    demo: &str,
+    no_attach: bool,
+    shell: bool,
+    cmd: &[String],
+) -> Result<()> {
     let eff = loaded.config.effective(demo)?;
     let tpl = &loaded.config.template;
     let (name, secrets) = spawn_fresh(loaded, smol, &eff)?;
     print_ready(&eff, &name);
-    if attach {
-        let cmd = vec!["opencode".to_string()];
+    if !no_attach {
+        // Landing target: explicit `-- cmd` > --shell flag > [defaults] attach
+        // > opencode.
+        let program: Vec<String> = if !cmd.is_empty() {
+            cmd.to_vec()
+        } else if shell || loaded.config.defaults.attach.as_deref() == Some("shell") {
+            vec![tpl.shell.clone()]
+        } else {
+            vec!["opencode".to_string()]
+        };
         smol.run_inherit(&refs(&exec_args(
             &name,
             &tpl.workspace,
             true,
             false,
             &secrets,
-            &cmd,
+            &program,
         )))?;
         util::warn(&format!(
             "machine still running — `democtl stop {}` when the demo is done",
@@ -388,6 +403,7 @@ mod tests {
                 build: None,
                 defaults: crate::config::DefaultsCfg {
                     demo: None,
+                    attach: None,
                     net: true,
                     ssh_agent: true,
                     secret_env: vec![],

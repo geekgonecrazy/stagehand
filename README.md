@@ -11,6 +11,8 @@ on your Mac.
 ```
 democtl build            # once: template VM → golden image (opencode preinstalled)
 democtl new              # fresh VM, fixed port, lands you inside opencode
+democtl new --shell      # land in a shell instead
+democtl new -- python3   # land in any command
 democtl new --no-attach  # start it without attaching
 democtl open             # re-attach later (boots it if stopped; session intact)
 democtl stop             # done: VM stopped, session preserved
@@ -70,6 +72,7 @@ democtl build                   # ~5 min once: installs packages + opencode in a
 ```toml
 [defaults]
 demo = "checkout"               # what an unnamed `democtl new`/`open`/`stop` means
+attach = "opencode"             # what `democtl new` lands in: "opencode" or "shell"
 guest_port = 8080               # where your webapp listens inside the VM
 
 # Host-side credential bindings (recommended): the VM sees a placeholder,

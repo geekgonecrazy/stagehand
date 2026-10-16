@@ -34,6 +34,8 @@ pub struct TemplateCfg {
 pub struct DefaultsCfg {
     /// Demo used when a command is given without an explicit name.
     pub demo: Option<String>,
+    /// What `democtl new` attaches to: "opencode" (default) or "shell".
+    pub attach: Option<String>,
     pub net: bool,
     pub ssh_agent: bool,
     pub secret_env: Vec<String>,
@@ -290,6 +292,7 @@ struct State {
 #[serde(default)]
 struct RawDefaults {
     demo: Option<String>,
+    attach: Option<String>,
     net: Option<bool>,
     ssh_agent: Option<bool>,
     secret_env: Option<Vec<String>>,
@@ -376,6 +379,13 @@ impl RawConfig {
             build,
             defaults: DefaultsCfg {
                 demo: d.demo,
+                attach: match d.attach.as_deref() {
+                    None => None,
+                    Some("opencode") | Some("shell") => d.attach,
+                    Some(other) => bail!(
+                        "[defaults] attach must be \"opencode\" or \"shell\", got \"{other}\""
+                    ),
+                },
                 net: d.net.unwrap_or(true),
                 ssh_agent: d.ssh_agent.unwrap_or(true),
                 secret_env: d.secret_env.unwrap_or_default(),

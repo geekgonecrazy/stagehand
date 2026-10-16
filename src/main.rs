@@ -32,8 +32,8 @@ fn run() -> Result<()> {
             let loaded = config::load(cli.config.as_deref())?;
             let demo = loaded.resolve_demo(cmd.demo_name().as_deref())?;
             let result = match &cmd {
-                Cmd::New { no_attach, .. } => {
-                    cmd::demo::new(&loaded, &smol, &demo, !*no_attach)
+                Cmd::New { no_attach, shell, cmd, .. } => {
+                    cmd::demo::new(&loaded, &smol, &demo, *no_attach, *shell, cmd)
                 }
                 Cmd::Open { opencode, cmd, .. } => {
                     cmd::demo::open(&loaded, &smol, &demo, *opencode, cmd)

@@ -52,7 +52,15 @@ pub enum Cmd {
         /// used, or the only configured demo)
         demo: Option<String>,
 
-        /// Start the VM but don't attach to opencode
+        /// Land in a shell instead of opencode (or [defaults] attach)
+        #[arg(long)]
+        shell: bool,
+
+        /// Run this command instead of attaching to opencode (after `--`)
+        #[arg(last = true)]
+        cmd: Vec<String>,
+
+        /// Start the VM but don't attach to anything
         #[arg(long)]
         no_attach: bool,
     },
