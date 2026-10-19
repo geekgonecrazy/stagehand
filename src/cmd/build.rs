@@ -89,7 +89,29 @@ fn mise_prelude(tools: &[String]) -> String {
     format!(
         r#"echo "==> installing mise + tools: {joined}"
 if ! command -v mise >/dev/null 2>&1; then
-  curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+  # Base images (e.g. debian:bookworm-slim) ship without curl or wget, and
+  # the builder script runs after this prelude, so it can't install them
+  # for us. Provision a downloader first, then fetch the installer.
+  if ! command -v curl >/dev/null 2>&1 && ! command -v wget >/dev/null 2>&1; then
+    echo "==> installing curl"
+    if command -v apt-get >/dev/null 2>&1; then
+      export DEBIAN_FRONTEND=noninteractive
+      apt-get update -qq
+      apt-get install -y -qq --no-install-recommends curl ca-certificates
+    elif command -v apk >/dev/null 2>&1; then
+      apk add --no-cache curl ca-certificates
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y -q curl ca-certificates
+    else
+      echo "no curl/wget and no known package manager to install one" >&2
+      exit 1
+    fi
+  fi
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+  else
+    wget -qO- https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh
+  fi
 fi
 export PATH="$HOME/.local/share/mise/shims:$PATH"
 mise --version
