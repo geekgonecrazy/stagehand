@@ -45,7 +45,8 @@ image = "debian:bookworm-slim"
 
 # Demo toolchains via mise; every binary lands on PATH through mirrored shims.
 # node is required by opencode 2.x (npm package postinstall).
-tools = ["node@lts", "opencode@latest", "go@latest", "rust@stable"]
+# atomic comes prebuilt from the aqua registry — no cross-compile needed.
+tools = ["node@lts", "opencode@latest", "go@latest", "rust@stable", "aqua:atomicdotdev/atomic@0.20.0"]
 
 # Distro packages in the image; build-essential provides cc so cargo can link.
 packages = [
@@ -71,22 +72,3 @@ atomic agent enable --agent opencode --force || \
 atomic agent status || true
 """
 
-# Optional cross-compile stage: builds the Linux `atomic` binary from the
-# local checkout and installs it into the golden image at /usr/local/bin.
-# The builder machine persists, so only the first build is slow.
-[builder]
-image = "debian:bookworm-slim"
-source = "/Users/aaron/code/work/atomic"
-tools = ["rust@stable"]
-artifacts = ["atomic"]
-script = """
-set -eu
-export DEBIAN_FRONTEND=noninteractive
-export CARGO_TARGET_DIR=/build/target
-
-apt-get update -qq
-apt-get install -y -qq --no-install-recommends build-essential curl pkg-config ca-certificates unzip
-
-cargo build --release --manifest-path /src/Cargo.toml -p atomic-cli
-cp /build/target/release/atomic /build/artifacts/atomic
-"""

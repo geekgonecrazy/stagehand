@@ -75,8 +75,11 @@ fn build_script(build: &crate::config::BuildCfg) -> String {
 }
 
 /// The tool name part of a mise spec: `some-cli@1.19.0` → `some-cli`.
+/// Registry specs resolve to their repo name: `aqua:atomicdotdev/atomic@0.20.0`
+/// → `atomic`.
 fn tool_name(spec: &str) -> &str {
-    spec.split('@').next().unwrap_or(spec)
+    let name = spec.split('@').next().unwrap_or(spec);
+    name.rsplit('/').next().unwrap_or(name)
 }
 
 /// mise bootstrap prelude prepended to the builder script when `[build].tools`
@@ -485,5 +488,6 @@ mod tests {
     fn tool_name_strips_version() {
         assert_eq!(tool_name("some-cli@1.0"), "some-cli");
         assert_eq!(tool_name("rust"), "rust");
+        assert_eq!(tool_name("aqua:atomicdotdev/atomic@0.20.0"), "atomic");
     }
 }
